@@ -44,7 +44,7 @@ public class LR_Main {
 	private static LB LB;
 	private static double bestUB = GRB.INFINITY;
 	private static double bestLB = -1 * GRB.INFINITY;
-	private final static double gap = 0.03; // Termination criteria: the difference between the 
+	private final static double gap = 0.05; // Termination criteria: the difference between the 
 											// last obtained objective function value and the second to the last
 	
 	// Branch and Bound attributes
@@ -830,7 +830,7 @@ public class LR_Main {
 		// Constraint 6
 		/*Matrix D6 = new Matrix(N*(N-1)*(R+1)/2, nVar);
 		Matrix d6 = new Matrix(N*(N-1)*(R+1)/2, 1, M);
-		Matrix U6 = new Matrix(N*(N-1)*(R+1)/2, 1);		
+		Matrix U6 = new Matrix(N*(N-1)*(R+1)/2, 1, 500);		
 		D6 = new Matrix(N*(N-1)*(R+1)/2,nVar);
 		cntr = 0;		
 		for (int i = 0; i < N; i++) {
@@ -861,7 +861,7 @@ public class LR_Main {
 		// Constraint 7
 		Matrix D7 = new Matrix(N*(N-1)*(R+1)/2, nVar);
 		Matrix d7 = new Matrix(N*(N-1)*(R+1)/2, 1, M);
-		Matrix U7 = new Matrix(N*(N-1)*(R+1)/2, 1, 0);		
+		Matrix U7 = new Matrix(N*(N-1)*(R+1)/2, 1, 500);		
 		cntr = 0; 		
 		for (int i = 0; i < N; i++) {
 			for (int j = i + 1; j < N; j++) {
@@ -960,10 +960,10 @@ public class LR_Main {
 			}
 		}
 		
-	/*	// Constraint 10
-		Matrix D10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
+		// Constraint 10
+		/*Matrix D10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
 		Matrix d10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, M);
-		Matrix U10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 0);
+		Matrix U10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 500);
 		cntr = 0; 		
 		for (int i=0;i<N;i++){
 			for (int j=i+1;j<N;j++){
@@ -997,7 +997,7 @@ public class LR_Main {
 		// Constraint 11
 		Matrix D11 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
 		Matrix d11 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, M);
-		Matrix U11 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 0);
+		Matrix U11 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 500);
 		cntr = 0; 		
 		for (int i=0;i<N;i++){
 			for (int j=i+1;j<N;j++){
@@ -1040,9 +1040,9 @@ public class LR_Main {
 		ArrayList<Matrix> ds_List = new ArrayList<Matrix>();
 		ArrayList<Matrix> Ds_List = new ArrayList<Matrix>();
 		ArrayList<Matrix> Us_List = new ArrayList<Matrix>();
-		ds_List.add(d8);ds_List.add(d9);
-		Ds_List.add(D8);Ds_List.add(D9);		
-		Us_List.add(U8);Us_List.add(U9);
+		/*ds_List.add(d6);ds_List.add(d7);*/ds_List.add(d8);ds_List.add(d9);/*ds_List.add(d10);ds_List.add(d11);*/
+		/*Ds_List.add(D6);Ds_List.add(D7);*/Ds_List.add(D8);Ds_List.add(D9);/*Ds_List.add(D10);Ds_List.add(D11);	*/	
+		/*Us_List.add(U6);Us_List.add(U7);*/Us_List.add(U8);Us_List.add(U9);/*Us_List.add(U10);Us_List.add(U11);*/		
 		ds = concatH(ds_List);
 		Ds = concatH(Ds_List);
 		Us = concatH(Us_List);
@@ -1050,7 +1050,7 @@ public class LR_Main {
 //		OP.optimize();
 		cntr = 0;
 		double currentGap = GRB.INFINITY;
-		while(currentGap > gap && miu > 0.1){
+		while(currentGap > gap && (k<10 || LB.value!=bestLB)){
 			cntr = dissectEpsilon(cntr, 15);
 //			miu = updateMiu(miu, k, N);
 			miu = updateMiuC(Ds, ds);		// Update Miu
@@ -1152,6 +1152,8 @@ public class LR_Main {
 					rightChild.varToFix = getBranchVar(x, unfixedVars);
 					updateLB(rightChild);				
 					unexploredNodes.add(0, rightChild);
+				}else{
+					BBNodeList.add(rightChild);
 				}
 				LR_Main.relaxVar(SP, rightChild.noOfFixedVars);
 				
@@ -1163,6 +1165,8 @@ public class LR_Main {
 					leftChild.varToFix = getBranchVar(x, unfixedVars);
 					updateLB(rightChild);
 					unexploredNodes.add(0, leftChild);
+				}else{
+					BBNodeList.add(leftChild);
 				}				
 				LR_Main.relaxVar(SP, leftChild.noOfFixedVars);
 			}
@@ -1171,7 +1175,7 @@ public class LR_Main {
 			BBNodeList.add(parent);
 			unexploredNodes.remove(parent);
 		}
-		System.out.println(bestNode.lb.vars);
+		System.out.println(BBNodeList.peek().lb.vars);
 		System.out.println("B&B done!");
 		
 		

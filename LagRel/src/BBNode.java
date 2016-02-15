@@ -20,6 +20,12 @@ public class BBNode implements Comparable<BBNode> {
 	public double gap = GRB.INFINITY;
 	public double optGap = 0.01;
 	
+	private Matrix nodesBestUs;
+	private double nodeBestUB;
+	private LB nodesBestLB = new LB();
+	public List<String> nodesBestSelectedLocations = new ArrayList<String>();
+
+	
 	/**
 	 * Constructor 
 	 * @param ind - node index
@@ -61,6 +67,9 @@ public class BBNode implements Comparable<BBNode> {
 		this.bestLB = bestLB;
 		this.varsFixedTo0.addAll(fixTo0);
 		this.varsFixedTo1.addAll(fixTo1);
+		nodesBestLB.value = bestLB;
+		
+		
 		
 		if(valueToFix)
 			this.varsFixedTo1.add(varToFix);
@@ -69,14 +78,14 @@ public class BBNode implements Comparable<BBNode> {
 		
 		LR_Main.fixVar(varsFixedTo0, false, SP);
 		LR_Main.fixVar(varsFixedTo1, true, SP);
-		double miu = 1;
+		double miu;
 		int cntr = 0;
 		SP.optimize();
 		if (SP.get(GRB.IntAttr.Status) != 3){  // Model feasibility check
 			UB = SP.get(GRB.DoubleAttr.ObjVal);
 //			System.out.println("miu: " + miu + " - Itr" + k + ": LB = " + lb.value + " - UB = " + UB);
 
-			while(this.gap > optGap && cntr < 30){
+			while(this.gap > optGap && cntr<5){
 //				miu = LR_Main.updateMiu(miu, k, N);
 				miu = LR_Main.updateMiuC(Ds, ds);
 				this.Us = LR_Main.updateU(SP, miu, this.Us, ds, Ds);		// Update Lagrangian multipliers
@@ -93,16 +102,35 @@ public class BBNode implements Comparable<BBNode> {
 				lb = LR_Main.obtainLB(OP, SP);
 				LR_Main.updateLB(lb.value);
 				cntr++;							// Counter update
-				updateGap();
+				updateGap();	
+				updateBestResult(this.lb, this.UB, this.Us, this.selectedLocations);
 				System.out.println("miu: " + miu + " - Itr" + cntr + ": LB=" + lb.value + " - UB= " + UB + " - gap= " + this.gap);
 			}
-			
+			updateNode(nodeBestUB, nodesBestLB, nodesBestUs, nodesBestSelectedLocations);
 		}else{
 			this.fathom = true;
 		}			
 
 //		System.out.println("# of constraints: " + SP.get(GRB.IntAttr.NumConstrs));
 		noOfFixedVars = this.varsFixedTo0.size() + this.varsFixedTo1.size();		
+	}
+	
+	private void updateNode(double bestBB_UB, LB bestBB_LB, Matrix bestBB_Us, List<String> bestBB_selectedLocations){
+		if (this.lb.value < bestBB_LB.value){
+			this.lb = bestBB_LB;
+			this.UB = bestBB_UB;
+			this.Us = bestBB_Us;
+			this.selectedLocations = bestBB_selectedLocations;
+		}
+	}
+	
+	private void updateBestResult(LB lb, double ub, Matrix Us, List<String> selectedLocations){
+		if (lb.value > this.nodesBestLB.value) {
+			this.nodesBestLB = lb;
+			this.nodeBestUB = ub;
+			this.nodesBestUs = Us;
+			this.nodesBestSelectedLocations = selectedLocations;
+		}
 	}
 	
 	/**
