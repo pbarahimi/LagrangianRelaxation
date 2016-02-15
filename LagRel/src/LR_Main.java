@@ -2,8 +2,12 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.PriorityQueue;
+import java.util.Queue;
 
 import Jama.Matrix;
 import gurobi.*;
@@ -39,13 +43,15 @@ public class LR_Main {
 	private static double UB;
 	private static LB LB;
 	private static double bestUB = GRB.INFINITY;
-	private final static double gap = 0.2; // Termination criteria: the difference between the 
+	private static double bestLB = -1 * GRB.INFINITY;
+	private final static double gap = 0.03; // Termination criteria: the difference between the 
 											// last obtained objective function value and the second to the last
 	
 	// Branch and Bound attributes
-	private static List<BBNode> exploredNodes = new ArrayList<BBNode>();
+//	private static List<BBNode> exploredNodes = new ArrayList<BBNode>();
 	private static List<BBNode> unexploredNodes = new ArrayList<BBNode>();
 	private static BBNode bestNode;
+	private static PriorityQueue<BBNode> BBNodeList = new PriorityQueue<BBNode>();
 	
 	// Variable fixing attributes
 	private static double z; // incumbent value for variable fixing
@@ -110,6 +116,14 @@ public class LR_Main {
 	 * Lagrangian relaxation methods
 	 *
 	 */
+	
+	/**
+	 * Updates the bestLB found so far.
+	 * @param x
+	 */
+	protected static void updateLB(double x){
+		if (x > bestLB) bestLB = x;
+	}
 	
 	/**
 	 * Compares the new UB found with the UB found so far and replaces it 
@@ -229,7 +243,7 @@ public class LR_Main {
 	 * @return
 	 * @throws GRBException 
 	 */
-	private static double updateMiuC(Matrix D, Matrix d) throws GRBException{
+	protected static double updateMiuC(Matrix D, Matrix d) throws GRBException{
 //		double gap1 = delta2 - delta1;
 		Matrix X = getVarsMatrix(SP);
 		Matrix denuminatorMat = D.times(X.transpose());		
@@ -405,18 +419,26 @@ public class LR_Main {
 	 * Variable fixing methods
 	 */
 	
-	
-	public static void computeBenefits(GRBModel model, GRBVar[][][][][] x) throws GRBException{
-		// initializing the benefits array with -inf
-		double[] benefits = new double[N];
-		/*for (int i=0;i<benefits.length;i++){
-			benefits[i] = -1*GRB.INFINITY;
-		}*/
+	/**
+	 * Calculates the benefits of locating a hub in any of the nodes and divides the location variables
+	 * into selected and unselected location and put them in min and max heap respectively.
+	 *  
+	 * @param model
+	 * @param x - routing variables
+	 * @param y - location variables
+	 * @return
+	 * @throws GRBException
+	 */
+	public static BenefitList computeBenefits(GRBModel model, GRBVar[][][][][] x, GRBVar[] y) throws GRBException{
+		BenefitList output = new BenefitList();
+//		BenefitList.Benefit[] benefits = new BenefitList.Benefit[N];
+		double benefit;
 		
 		// computing benefits
 		double temp;
 		double value;
 		for (int k = 0 ; k < N ; k++){
+			benefit = 0;
 			
 			for (int i = 0 ; i < N ; i++){
 				for (int j = i+1 ; j < N ; j++){
@@ -428,16 +450,21 @@ public class LR_Main {
 							value = (value > temp) ? value : temp;							
 						}
 					}
-					
-					benefits[k] += Math.max(0,value);
+					benefit += Math.max(0,value);					
 				}
 			}
+			output.add(y[k], k, benefit);
 		}
 		
-		for (int i = 0 ; i < benefits.length ; i++){
-			System.out.print(benefits[i] + "-");
-		}
-		System.out.println();
+		return output;
+	}
+	
+	public static void fixVar2(BenefitList list, GRBVar[] y, double UB, double LB){
+		for (BenefitList.Benefit location : list.selectedLocs)
+			if (UB - location.benefit + list.unselectedLocs.peek().benefit < LB) fixTo1.add(y[location.index]); 
+		
+		for (BenefitList.Benefit location : list.unselectedLocs)
+			if (UB + location.benefit - list.selectedLocs.peek().benefit < LB) fixTo0.add(y[location.index]);		
 	}
 	
 	/**
@@ -1006,7 +1033,7 @@ public class LR_Main {
 		 */
 		// Obtaining Upper Bound
 		SP.optimize();
-		printSol(SP);
+//		printSol(SP);
 		LB = obtainLB(OP, SP);
 		UB = SP.get(GRB.DoubleAttr.ObjVal);
 		
@@ -1035,36 +1062,54 @@ public class LR_Main {
 			cntr = updateUB(cntr, UB);
 //			computeBenefits(OP,x);
 			LB = obtainLB(OP, SP);
+			updateLB(LB.value);   // update best LB
 			k++;	// Counter update
-			currentGap = Math.abs((bestUB - LB.value)/LB.value);
+			currentGap = Math.abs((UB - LB.value)/LB.value);
 			System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB + " - Gap = " + currentGap + " - sol: " + printSol2(SP));
 		}	
 		printSol(SP);
+//		printSol2(SP);
+		System.out.println("Lower Bound: " + LB.value + "  -  Upper Bound: " + UB);
+		
+		/*
+		 *  Snyder Daskin Variable Fixing procedure
+		 */
+		/*BenefitList benefits = computeBenefits(SP, x, y);
+		fixVar2(benefits, y, UB, LB.value);
+		System.out.println(fixTo0);
+		System.out.println(fixTo1);
+		for (int i = 0 ; i < N ; i++){
+			if (y[i].get(GRB.DoubleAttr.X)==1){
+				SP.get(GRB.DoubleAttr.ObjVal) + benefits.
+			}else{
+				
+			}
+		}*/
 		
 		/*
 		 *  Variable fixing procedure
 		 */
 		// Getting the incumbent value
-		setBinaries(OP);
+		/*setBinaries(OP);
 		OP.optimize();
 		for (int i = 0 ; i < N ; i++)
 			fixVar(y0[i], y[i].get(GRB.DoubleAttr.X), "fix"+i);
 		OP.optimize();
 		printSol(OP);
 		z = OP.get(GRB.DoubleAttr.ObjVal);
-		
+		z = LB.value;
 		// Putting variables to be fixed into a list
-		printSol(OP);
 		setN1N0(SP.getVars());
 		varsTobeFixed(N1, N0, z);
 		System.out.println("Done");
 		
 		// Removing fixing constraints
-				for (int i = N ; i > 0 ; i--){
-					int k = OP.get(GRB.IntAttr.NumConstrs) - 1;
-					OP.remove(OP.getConstr(k));
-					OP.update();
-				}	
+		for (int i = N ; i > 0 ; i--){
+			int k = OP.get(GRB.IntAttr.NumConstrs) - 1;
+			OP.remove(OP.getConstr(k));
+			OP.update();
+		}	*/
+		
 		/*
 		 * B&B procedure 2 
 		 */
@@ -1094,14 +1139,14 @@ public class LR_Main {
 			System.out.println("fathomed: " + parent.fathom);
 			System.out.println("node UB: " + parent.UB);
 			System.out.println("node LB: " + parent.lb.value);
-			System.out.println("Gap: " + (parent.UB - parent.lb.value));
+			System.out.println("Gap: " + parent.gap);
 			System.out.println("var to be fixed: " + parent.varToFix.get(GRB.StringAttr.VarName));
 			System.out.println("Locations selected: " + parent.selectedLocations);
 			System.out.println("-----------------------------");
 			if (!parent.fathom){
 				
-				BBNode rightChild = new BBNode(2*parent.ind+2, N, parent.Us, Ds, ds, OP, SP, LB.value, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, true);
-				rightChild.updateFathom(bestNode.gap, LB.value, P, N);
+				BBNode rightChild = new BBNode(2*parent.ind+2, N, parent.Us, Ds, ds, OP, SP, bestLB, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, true);
+				rightChild.updateFathom(P, N);
 				if (!rightChild.fathom){
 					unfixedVars = getUnfixedVars(y, rightChild);
 					rightChild.varToFix = getBranchVar(x, unfixedVars);
@@ -1111,8 +1156,8 @@ public class LR_Main {
 				LR_Main.relaxVar(SP, rightChild.noOfFixedVars);
 				
 				
-				BBNode leftChild = new BBNode(2*parent.ind+1, N, parent.Us, Ds, ds, OP, SP, LB.value, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, false);
-				leftChild.updateFathom(bestNode.gap, LB.value, P, N);
+				BBNode leftChild = new BBNode(2*parent.ind+1, N, parent.Us, Ds, ds, OP, SP, bestLB, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, false);
+				leftChild.updateFathom(P, N);
 				if (!leftChild.fathom){
 					unfixedVars = getUnfixedVars(y, leftChild);
 					leftChild.varToFix = getBranchVar(x, unfixedVars);
@@ -1122,12 +1167,12 @@ public class LR_Main {
 				LR_Main.relaxVar(SP, leftChild.noOfFixedVars);
 			}
 			updateBestNode(parent);
-			exploredNodes.add(parent);
+//			exploredNodes.add(parent);
+			BBNodeList.add(parent);
 			unexploredNodes.remove(parent);
 		}
 		System.out.println(bestNode.lb.vars);
 		System.out.println("B&B done!");
-		
 		
 		
 		// Adding rows
@@ -1150,8 +1195,6 @@ public class LR_Main {
 			X = getVarsMatrix(OP);
 		}*/
 		
-		
-	
 	}
 
 }
