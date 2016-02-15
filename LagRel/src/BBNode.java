@@ -36,11 +36,12 @@ public class BBNode implements Comparable<BBNode> {
 	 * @param OP - 
 	 * @throws GRBException 
 	 */
-	public BBNode(int ind, int N, Matrix Us, LB LB, double UB) throws GRBException{
+	public BBNode(int ind, int N, Matrix Us, LB LB, double UB, List<String> selectedLocations) throws GRBException{
 		this.ind = ind;
 		this.Us = Us;
 		this.lb = LB;
 		this.UB = UB; 
+		this.selectedLocations = selectedLocations;
 		updateGap();
 	}
 	
@@ -93,7 +94,7 @@ public class BBNode implements Comparable<BBNode> {
 				SP.optimize();
 				UB = SP.get(GRB.DoubleAttr.ObjVal);
 //				LR_Main.printSol(SP);
-				this.selectedLocations.clear();
+				this.selectedLocations = new ArrayList<String>();
 				for (int i = 1 ; i <= N ; i++){
 					GRBVar var = SP.getVar(SP.get(GRB.IntAttr.NumVars)-i);
 					if (var.get(GRB.DoubleAttr.X) > 0)
@@ -116,7 +117,7 @@ public class BBNode implements Comparable<BBNode> {
 	}
 	
 	private void updateNode(double bestBB_UB, LB bestBB_LB, Matrix bestBB_Us, List<String> bestBB_selectedLocations){
-		if (this.lb.value < bestBB_LB.value){
+		if (this.lb.value <= bestBB_LB.value){
 			this.lb = bestBB_LB;
 			this.UB = bestBB_UB;
 			this.Us = bestBB_Us;
@@ -130,8 +131,7 @@ public class BBNode implements Comparable<BBNode> {
 			this.nodeBestUB = ub;
 			this.nodesBestUs = Us;
 			this.nodesBestSelectedLocations = new ArrayList<String>();
-			for (String s: selectedLocations)
-				this.nodesBestSelectedLocations.add(s.toString());
+			this.nodesBestSelectedLocations.addAll(selectedLocations);
 		}
 	}
 	
@@ -155,7 +155,7 @@ public class BBNode implements Comparable<BBNode> {
 	
 	@Override
 	public int compareTo(BBNode other){
-		double temp = this.gap - other.gap;
+		double temp = this.lb.value - other.lb.value;
 		if (temp>0) return 1;
 		else if (temp<0) return -1;
 		else return 0;

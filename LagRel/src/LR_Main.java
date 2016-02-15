@@ -1051,7 +1051,7 @@ public class LR_Main {
 //		OP.optimize();
 		cntr = 0;
 		double currentGap = GRB.INFINITY;
-		while(currentGap > gap && (k<10 || LB.value!=bestLB)){
+		while(currentGap > gap && (k<5 || LB.value!=bestLB)){
 			cntr = dissectEpsilon(cntr, 15);
 //			miu = updateMiu(miu, k, N);
 			miu = updateMiuC(Ds, ds);		// Update Miu
@@ -1070,6 +1070,12 @@ public class LR_Main {
 		}	
 //		printSol(SP);
 //		printSol2(SP);
+		List<String> selectedLocations = new ArrayList<String>();
+		for (int i = 1 ; i <= N ; i++){
+			GRBVar var = SP.getVar(SP.get(GRB.IntAttr.NumVars)-i);
+			if (var.get(GRB.DoubleAttr.X) > 0)
+				selectedLocations.add(var.get(GRB.StringAttr.VarName));					
+		}
 		System.out.println("Lower Bound: " + LB.value + "  -  Upper Bound: " + UB);
 		
 		/*
@@ -1115,7 +1121,7 @@ public class LR_Main {
 		 * B&B procedure 2 
 		 */
 		
-		BBNode rootNode = new BBNode(0,N,Us, LB, UB);
+		BBNode rootNode = new BBNode(0,N,Us, LB, UB, selectedLocations);
 		bestNode = rootNode;
 		List<GRBVar> unfixedVars;
 		unexploredNodes.add(rootNode);
@@ -1176,7 +1182,7 @@ public class LR_Main {
 			BBNodeList.add(parent);
 			unexploredNodes.remove(parent);
 		}
-		System.out.println(BBNodeList.peek().lb.vars);
+		System.out.println(BBNodeList.peek().selectedLocations);
 		System.out.println("Elapsed Time: " + (System.currentTimeMillis() - startTime));
 		System.out.println("B&B done!");
 		
