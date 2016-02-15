@@ -1032,6 +1032,7 @@ public class LR_Main {
 		 * Lagrangian Relaxation Algorithm starts:
 		 */
 		// Obtaining Upper Bound
+		double startTime = System.currentTimeMillis();
 		SP.optimize();
 //		printSol(SP);
 		LB = obtainLB(OP, SP);
@@ -1067,7 +1068,7 @@ public class LR_Main {
 			currentGap = Math.abs((UB - LB.value)/LB.value);
 			System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB + " - Gap = " + currentGap + " - sol: " + printSol2(SP));
 		}	
-		printSol(SP);
+//		printSol(SP);
 //		printSol2(SP);
 		System.out.println("Lower Bound: " + LB.value + "  -  Upper Bound: " + UB);
 		
@@ -1176,6 +1177,7 @@ public class LR_Main {
 			unexploredNodes.remove(parent);
 		}
 		System.out.println(BBNodeList.peek().lb.vars);
+		System.out.println("Elapsed Time: " + (System.currentTimeMillis() - startTime));
 		System.out.println("B&B done!");
 		
 		

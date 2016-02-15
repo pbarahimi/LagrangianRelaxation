@@ -125,11 +125,13 @@ public class BBNode implements Comparable<BBNode> {
 	}
 	
 	private void updateBestResult(LB lb, double ub, Matrix Us, List<String> selectedLocations){
-		if (lb.value > this.nodesBestLB.value) {
+		if (lb.value >= this.nodesBestLB.value) {
 			this.nodesBestLB = lb;
 			this.nodeBestUB = ub;
 			this.nodesBestUs = Us;
-			this.nodesBestSelectedLocations = selectedLocations;
+			this.nodesBestSelectedLocations = new ArrayList<String>();
+			for (String s: selectedLocations)
+				this.nodesBestSelectedLocations.add(s.toString());
 		}
 	}
 	
