@@ -828,7 +828,7 @@ public class LR_Main {
 		 *  Building Lagrangian multipliers and corresponding constraints 
 		 */
 		// Constraint 6
-		/*Matrix D6 = new Matrix(N*(N-1)*(R+1)/2, nVar);
+		Matrix D6 = new Matrix(N*(N-1)*(R+1)/2, nVar);
 		Matrix d6 = new Matrix(N*(N-1)*(R+1)/2, 1, M);
 		Matrix U6 = new Matrix(N*(N-1)*(R+1)/2, 1, 500);		
 		D6 = new Matrix(N*(N-1)*(R+1)/2,nVar);
@@ -886,7 +886,7 @@ public class LR_Main {
 //					SP.addConstr(con7, GRB.LESS_EQUAL, M, "u7_" + i + "_" + j + "_" + r);
 				}
 			}
-		}*/
+		}
 		
 		// Constraint 8
 		Matrix D8 = new Matrix((int) (N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
@@ -961,7 +961,7 @@ public class LR_Main {
 		}
 		
 		// Constraint 10
-		/*Matrix D10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
+		Matrix D10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
 		Matrix d10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, M);
 		Matrix U10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 500);
 		cntr = 0; 		
@@ -1026,7 +1026,7 @@ public class LR_Main {
 					}
 				}
 			}
-		}*/
+		}
 
 		/*
 		 * Lagrangian Relaxation Algorithm starts:
@@ -1041,9 +1041,9 @@ public class LR_Main {
 		ArrayList<Matrix> ds_List = new ArrayList<Matrix>();
 		ArrayList<Matrix> Ds_List = new ArrayList<Matrix>();
 		ArrayList<Matrix> Us_List = new ArrayList<Matrix>();
-		/*ds_List.add(d6);ds_List.add(d7);*/ds_List.add(d8);ds_List.add(d9);/*ds_List.add(d10);ds_List.add(d11);*/
-		/*Ds_List.add(D6);Ds_List.add(D7);*/Ds_List.add(D8);Ds_List.add(D9);/*Ds_List.add(D10);Ds_List.add(D11);	*/	
-		/*Us_List.add(U6);Us_List.add(U7);*/Us_List.add(U8);Us_List.add(U9);/*Us_List.add(U10);Us_List.add(U11);*/		
+		ds_List.add(d6);ds_List.add(d7);ds_List.add(d8);ds_List.add(d9);ds_List.add(d10);ds_List.add(d11);
+		Ds_List.add(D6);Ds_List.add(D7);Ds_List.add(D8);Ds_List.add(D9);Ds_List.add(D10);Ds_List.add(D11);	
+		Us_List.add(U6);Us_List.add(U7);Us_List.add(U8);Us_List.add(U9);Us_List.add(U10);Us_List.add(U11);		
 		ds = concatH(ds_List);
 		Ds = concatH(Ds_List);
 		Us = concatH(Us_List);
@@ -1051,7 +1051,7 @@ public class LR_Main {
 //		OP.optimize();
 		cntr = 0;
 		double currentGap = GRB.INFINITY;
-		while(currentGap > gap && (k<5 || LB.value!=bestLB)){
+		while(currentGap > gap && (k<10 || LB.value!=bestLB)){
 			cntr = dissectEpsilon(cntr, 15);
 //			miu = updateMiu(miu, k, N);
 			miu = updateMiuC(Ds, ds);		// Update Miu
