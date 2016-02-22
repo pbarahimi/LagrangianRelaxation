@@ -422,6 +422,21 @@ public class LR_Main {
 			bestNode = node;
 	}
 	
+	/**
+	 * Prints B&B node attributes
+	 * @param node
+	 * @throws GRBException
+	 */
+	public static void printNode(BBNode node) throws GRBException{
+		System.out.println("fathomed: " + node.fathom);
+		System.out.println("node UB: " + node.UB);
+		System.out.println("node LB: " + node.lb.value);
+		System.out.println("Gap: " + node.gap);
+		if (node.varToFix != null) System.out.println("var to be fixed: " + node.varToFix.get(GRB.StringAttr.VarName));
+		System.out.println("Locations selected: " + node.selectedLocations);
+		System.out.println("-----------------------------");
+	}
+	
 	/*
 	 * Variable fixing methods
 	 */
@@ -1018,7 +1033,6 @@ public class LR_Main {
 		Ds = concatH(Ds_List);
 		Us = concatH(Us_List);
 		System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB);
-//		OP.optimize();
 		cntr = 0;
 		double currentGap = GRB.INFINITY;
 		while(currentGap > gap && (k<10 || LB.value!=bestLB)){
@@ -1028,18 +1042,14 @@ public class LR_Main {
 			Us = updateU(SP, miu, Us, ds, Ds);		// Update Lagrangian multipliers
 			updateObjCoeffs(SP, Us, ds, Ds);	// Update obj fun coefficients
 			SP.optimize();
-//			printSol(SP);
 			UB = SP.get(GRB.DoubleAttr.ObjVal);
 			cntr = updateUB(cntr, UB);
-//			computeBenefits(OP,x);
 			LB = obtainLB(OP, SP);
 			updateLB(LB.value);   // update best LB
 			k++;	// Counter update
 			currentGap = Math.abs((UB - LB.value)/LB.value);
 			System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB + " - Gap = " + currentGap + " - sol: " + printSol2(SP));
 		}	
-//		printSol(SP);
-//		printSol2(SP);
 		List<String> selectedLocations = new ArrayList<String>();
 		for (int i = 1 ; i <= N ; i++){
 			GRBVar var = SP.getVar(SP.get(GRB.IntAttr.NumVars)-i);
@@ -1085,19 +1095,18 @@ public class LR_Main {
 			int k = OP.get(GRB.IntAttr.NumConstrs) - 1;
 			OP.remove(OP.getConstr(k));
 			OP.update();
-		}	*/
+		}*/
 		
 		/*
 		 * B&B procedure 2 
 		 */
-		
-		BBNode rootNode = new BBNode(0,N,Us, LB, UB, selectedLocations);
+		BBNode rootNode = new BBNode(0, N, Us, LB, UB, selectedLocations);
 		bestNode = rootNode;
 		List<GRBVar> unfixedVars;
 		unexploredNodes.add(rootNode);
 		unfixedVars = getUnfixedVars(y, rootNode);
 		rootNode.varToFix = getBranchVar(x, unfixedVars);
-		System.out.println(rootNode.varToFix.get(GRB.StringAttr.VarName));
+		System.out.println("y" + rootNode.varToFix.get(GRB.StringAttr.VarName));
 		
 		while(!unexploredNodes.isEmpty()){
 			
@@ -1113,13 +1122,7 @@ public class LR_Main {
 				System.out.print(var.get(GRB.StringAttr.VarName));
 			}
 			System.out.println();
-			System.out.println("fathomed: " + parent.fathom);
-			System.out.println("node UB: " + parent.UB);
-			System.out.println("node LB: " + parent.lb.value);
-			System.out.println("Gap: " + parent.gap);
-			System.out.println("var to be fixed: " + parent.varToFix.get(GRB.StringAttr.VarName));
-			System.out.println("Locations selected: " + parent.selectedLocations);
-			System.out.println("-----------------------------");
+			
 			if (!parent.fathom){
 				
 				BBNode rightChild = new BBNode(2*parent.ind+2, N, parent.Us, Ds, ds, OP, SP, bestLB, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, true);
@@ -1127,12 +1130,13 @@ public class LR_Main {
 				if (!rightChild.fathom){
 					unfixedVars = getUnfixedVars(y, rightChild);
 					rightChild.varToFix = getBranchVar(x, unfixedVars);
-					updateLB(rightChild);				
+//					updateLB(rightChild);				
 					unexploredNodes.add(0, rightChild);
 				}else{
 					BBNodeList.add(rightChild);
 				}
 				LR_Main.relaxVar(SP, rightChild.noOfFixedVars);
+				printNode(rightChild);
 				
 				
 				BBNode leftChild = new BBNode(2*parent.ind+1, N, parent.Us, Ds, ds, OP, SP, bestLB, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, false);
@@ -1140,12 +1144,13 @@ public class LR_Main {
 				if (!leftChild.fathom){
 					unfixedVars = getUnfixedVars(y, leftChild);
 					leftChild.varToFix = getBranchVar(x, unfixedVars);
-					updateLB(rightChild);
+//					updateLB(rightChild);
 					unexploredNodes.add(0, leftChild);
 				}else{
 					BBNodeList.add(leftChild);
 				}				
 				LR_Main.relaxVar(SP, leftChild.noOfFixedVars);
+				printNode(leftChild);
 			}
 			updateBestNode(parent);
 //			exploredNodes.add(parent);
