@@ -1,7 +1,13 @@
+import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.Queue;
 
 import Jama.Matrix;
 import gurobi.*;
@@ -31,7 +37,7 @@ public class LR_Main {
 	private static Matrix C = new Matrix(1,(int) ((Math.pow(N, 3)*(N-1)*(R+1)/2)+N));
 	private static int k = 0;
 	private static double miu = 6;
-	private static double epsilon = 2;
+	protected static double epsilon = 2;
 	private static double UB;
 	private static LB LB;
 	private static double bestUB = GRB.INFINITY;
@@ -156,17 +162,18 @@ public class LR_Main {
 	}
 	
 	/**
-	 * prints the solution
+	 * prints the location solution
 	 * @param model
 	 * @throws GRBException
 	 */
 	protected static String printSol2(GRBModel model) throws GRBException{
 		String output = "values: ";
-		for (GRBVar var : model.getVars()) 
-			if (var.get(GRB.DoubleAttr.X)>0  && var.get(GRB.StringAttr.VarName).contains("y")){ 
-				output = output.concat(var.get(GRB.StringAttr.VarName)+ ",");
-			}
-		return output;
+		for (int i = 0 ; i < N ; i++){
+			GRBVar var = model.getVar(nVar-i-1);
+			if (var.get(GRB.DoubleAttr.X) > 0)
+				output = output.concat("y" + var.get(GRB.StringAttr.VarName)+ ","); 
+		}
+		return output.substring(0, output.length()-1);
 	}
 	
 	/**
@@ -276,7 +283,7 @@ public class LR_Main {
 		Matrix denuminatorMat = D.times(X.transpose());		
 		denuminatorMat = d.minus(denuminatorMat);
 		double denuminator = Math.pow(denuminatorMat.normF(),2);	 
-		double output = epsilon*(SP.get(GRB.DoubleAttr.ObjVal) - LB.value ) / denuminator;
+		double output = epsilon*(SP.get(GRB.DoubleAttr.ObjVal) - bestLB ) / denuminator;
 //		delta1 = delta2;
 //		delta2 = SP.get(GRB.DoubleAttr.ObjVal) - UB;
 //		double gap2 = delta2 - delta1;
@@ -344,6 +351,33 @@ public class LR_Main {
 	/*
 	 * Branch and Bound methods
 	 */
+	
+	/**
+	 * Prints B&B node attributes
+	 * @param node
+	 * @throws GRBException
+	 */
+	public static void printNode(BBNode node) throws GRBException{
+		System.out.println("Index: " + node.ind);
+		System.out.println("vars fixed to 1: " + printVarsNames(node.varsFixedTo1));
+		System.out.println("vars fixed to 0: " + printVarsNames(node.varsFixedTo0)) ;
+		System.out.println("fathomed: " + node.fathom);
+		System.out.println("node UB: " + node.UB);
+		System.out.println("node LB: " + node.lb.value);
+		System.out.println("Gap: " + node.gap);
+		if (node.varToFix != null) System.out.println("var to be fixed: " + node.varToFix.get(GRB.StringAttr.VarName));
+		System.out.println("Locations selected: " + node.selectedLocations);
+		System.out.println("-----------------------------");
+	}
+	
+	public static String printVarsNames(List<GRBVar> vars) throws GRBException{
+		String output = "";
+		for (GRBVar var: vars){
+			output = output.concat("y"+var.get(GRB.StringAttr.VarName)+" - ");
+		}
+		output= output.concat("\n");
+		return output;
+	}
 	
 	/**
 	 * Calculates the flow that goes through each hub and
@@ -420,21 +454,6 @@ public class LR_Main {
 	public static void updateBestNode(BBNode node){
 		if (node.UB > bestNode.UB)
 			bestNode = node;
-	}
-	
-	/**
-	 * Prints B&B node attributes
-	 * @param node
-	 * @throws GRBException
-	 */
-	public static void printNode(BBNode node) throws GRBException{
-		System.out.println("fathomed: " + node.fathom);
-		System.out.println("node UB: " + node.UB);
-		System.out.println("node LB: " + node.lb.value);
-		System.out.println("Gap: " + node.gap);
-		if (node.varToFix != null) System.out.println("var to be fixed: " + node.varToFix.get(GRB.StringAttr.VarName));
-		System.out.println("Locations selected: " + node.selectedLocations);
-		System.out.println("-----------------------------");
 	}
 	
 	/*
@@ -814,7 +833,7 @@ public class LR_Main {
 		 *  Building Lagrangian multipliers and corresponding constraints 
 		 */
 		// Constraint 6
-		Matrix D6 = new Matrix(N*(N-1)*(R+1)/2, nVar);
+/*		Matrix D6 = new Matrix(N*(N-1)*(R+1)/2, nVar);
 		Matrix d6 = new Matrix(N*(N-1)*(R+1)/2, 1, M);
 		Matrix U6 = new Matrix(N*(N-1)*(R+1)/2, 1, 500);		
 		D6 = new Matrix(N*(N-1)*(R+1)/2,nVar);
@@ -840,6 +859,7 @@ public class LR_Main {
 					con6.addTerm(M, y[i]);
 					OP.addConstr(con6_0, GRB.LESS_EQUAL, M, "u6_" + i + "_" + j + "_" + r);
 //					SP.addConstr(con6, GRB.LESS_EQUAL, M, "u6_" + i + "_" + j + "_" + r);
+					cntr++;
 				}
 			}
 		}
@@ -870,9 +890,10 @@ public class LR_Main {
 					con7.addTerm(M, y[j]);
 					OP.addConstr(con7_0, GRB.LESS_EQUAL, M, "u7_" + i + "_" + j + "_" + r);
 //					SP.addConstr(con7, GRB.LESS_EQUAL, M, "u7_" + i + "_" + j + "_" + r);
+					cntr++;
 				}
 			}
-		}
+		}*/
 		
 		// Constraint 8
 		Matrix D8 = new Matrix((int) (N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
@@ -946,7 +967,7 @@ public class LR_Main {
 			}
 		}
 		
-		// Constraint 10
+/*		// Constraint 10
 		Matrix D10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
 		Matrix d10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, M);
 		Matrix U10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 500);
@@ -975,6 +996,7 @@ public class LR_Main {
 						}
 						OP.addConstr(con10_0, GRB.LESS_EQUAL, M, "u10_" + i + "_" + j + "_" + k + "_" + r);
 //						SP.addConstr(con10, GRB.LESS_EQUAL, M, "u10_" + i + "_" + j + "_" + k + "_" + r);
+						cntr++;
 					}
 				}
 			}
@@ -1009,10 +1031,11 @@ public class LR_Main {
 						}
 						OP.addConstr(con11_0, GRB.LESS_EQUAL, M, "u11_" + i + "_" + j + "_" + m + "_" + r);
 //						SP.addConstr(con11, GRB.LESS_EQUAL, M, "u11_" + i + "_" + j + "_" + m + "_" + r);
+						cntr++;
 					}
 				}
 			}
-		}
+		}*/
 		/*
 		 * Lagrangian Relaxation Algorithm starts:
 		 */
@@ -1023,20 +1046,23 @@ public class LR_Main {
 		LB = obtainLB(OP, SP);
 		UB = SP.get(GRB.DoubleAttr.ObjVal);
 		
+		updateLB(LB.value);
+		
 		ArrayList<Matrix> ds_List = new ArrayList<Matrix>();
 		ArrayList<Matrix> Ds_List = new ArrayList<Matrix>();
 		ArrayList<Matrix> Us_List = new ArrayList<Matrix>();
-		ds_List.add(d6);ds_List.add(d7);ds_List.add(d8);ds_List.add(d9);ds_List.add(d10);ds_List.add(d11);
-		Ds_List.add(D6);Ds_List.add(D7);Ds_List.add(D8);Ds_List.add(D9);Ds_List.add(D10);Ds_List.add(D11);	
-		Us_List.add(U6);Us_List.add(U7);Us_List.add(U8);Us_List.add(U9);Us_List.add(U10);Us_List.add(U11);		
+		/*ds_List.add(d6);ds_List.add(d7);*/ds_List.add(d8);ds_List.add(d9);/*ds_List.add(d10);ds_List.add(d11);*/
+		/*Ds_List.add(D6);Ds_List.add(D7);*/Ds_List.add(D8);Ds_List.add(D9);/*Ds_List.add(D10);Ds_List.add(D11);	*/
+		/*Us_List.add(U6);Us_List.add(U7);*/Us_List.add(U8);Us_List.add(U9);/*Us_List.add(U10);Us_List.add(U11)*/;		
 		ds = concatH(ds_List);
 		Ds = concatH(Ds_List);
 		Us = concatH(Us_List);
 		System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB);
+//		OP.optimize();
 		cntr = 0;
 		double currentGap = GRB.INFINITY;
 		while(currentGap > gap && (k<10 || LB.value!=bestLB)){
-			cntr = dissectEpsilon(cntr, 15);
+			cntr = dissectEpsilon(cntr, 5);
 //			miu = updateMiu(miu, k, N);
 			miu = updateMiuC(Ds, ds);		// Update Miu
 			Us = updateU(SP, miu, Us, ds, Ds);		// Update Lagrangian multipliers
@@ -1044,11 +1070,12 @@ public class LR_Main {
 			SP.optimize();
 			UB = SP.get(GRB.DoubleAttr.ObjVal);
 			cntr = updateUB(cntr, UB);
+//			computeBenefits(OP,x);
 			LB = obtainLB(OP, SP);
 			updateLB(LB.value);   // update best LB
 			k++;	// Counter update
 			currentGap = Math.abs((UB - LB.value)/LB.value);
-			System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB + " - Gap = " + currentGap + " - sol: " + printSol2(SP));
+			System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB + " - Gap = " + currentGap + " - sol: " + printSol2(SP) + " - eps: " + epsilon);
 		}	
 		List<String> selectedLocations = new ArrayList<String>();
 		for (int i = 1 ; i <= N ; i++){
@@ -1095,42 +1122,30 @@ public class LR_Main {
 			int k = OP.get(GRB.IntAttr.NumConstrs) - 1;
 			OP.remove(OP.getConstr(k));
 			OP.update();
-		}*/
+		}	*/
 		
 		/*
 		 * B&B procedure 2 
 		 */
-		BBNode rootNode = new BBNode(0, N, Us, LB, UB, selectedLocations);
+		
+		BBNode rootNode = new BBNode(0,N,Us, LB, UB, selectedLocations);
 		bestNode = rootNode;
 		List<GRBVar> unfixedVars;
 		unexploredNodes.add(rootNode);
 		unfixedVars = getUnfixedVars(y, rootNode);
 		rootNode.varToFix = getBranchVar(x, unfixedVars);
-		System.out.println("y" + rootNode.varToFix.get(GRB.StringAttr.VarName));
+		System.out.println(rootNode.varToFix.get(GRB.StringAttr.VarName));
 		
 		while(!unexploredNodes.isEmpty()){
 			
 			BBNode parent = unexploredNodes.get(0);
-			System.out.println("Node index: " + parent.ind);
-			System.out.print("Fixed to 1: ");
-			for (GRBVar var: parent.varsFixedTo1){
-				System.out.print(var.get(GRB.StringAttr.VarName));
-			}
-			System.out.println();
-			System.out.print("Fixed to 0: ");
-			for (GRBVar var: parent.varsFixedTo0){
-				System.out.print(var.get(GRB.StringAttr.VarName));
-			}
-			System.out.println();
-			
 			if (!parent.fathom){
-				
 				BBNode rightChild = new BBNode(2*parent.ind+2, N, parent.Us, Ds, ds, OP, SP, bestLB, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, true);
 				rightChild.updateFathom(P, N);
 				if (!rightChild.fathom){
 					unfixedVars = getUnfixedVars(y, rightChild);
 					rightChild.varToFix = getBranchVar(x, unfixedVars);
-//					updateLB(rightChild);				
+					updateLB(rightChild);				
 					unexploredNodes.add(0, rightChild);
 				}else{
 					BBNodeList.add(rightChild);
@@ -1138,13 +1153,15 @@ public class LR_Main {
 				LR_Main.relaxVar(SP, rightChild.noOfFixedVars);
 				printNode(rightChild);
 				
-				
+				if (parent.Us == null) {
+					System.out.println();
+				}
 				BBNode leftChild = new BBNode(2*parent.ind+1, N, parent.Us, Ds, ds, OP, SP, bestLB, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, false);
 				leftChild.updateFathom(P, N);
 				if (!leftChild.fathom){
 					unfixedVars = getUnfixedVars(y, leftChild);
 					leftChild.varToFix = getBranchVar(x, unfixedVars);
-//					updateLB(rightChild);
+					updateLB(leftChild);
 					unexploredNodes.add(0, leftChild);
 				}else{
 					BBNodeList.add(leftChild);
@@ -1153,7 +1170,6 @@ public class LR_Main {
 				printNode(leftChild);
 			}
 			updateBestNode(parent);
-//			exploredNodes.add(parent);
 			BBNodeList.add(parent);
 			unexploredNodes.remove(parent);
 		}
