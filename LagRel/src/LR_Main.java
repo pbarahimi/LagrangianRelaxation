@@ -35,8 +35,6 @@ public class LR_Main {
 	private static Matrix Ds;
 	private static Matrix ds;
 	private static Matrix C = new Matrix(1,(int) ((Math.pow(N, 3)*(N-1)*(R+1)/2)+N));
-	private static HashMap<String, Integer> varHash0 = new HashMap<String, Integer>(); // For the original problem
-	private static HashMap<String, Integer> varHash = new HashMap<String, Integer>(); // For the sub problem
 	private static int k = 0;
 	private static double miu = 6;
 	private static double epsilon = 2;
@@ -192,9 +190,14 @@ public class LR_Main {
 			updatedC = updatedC.minus(U.transpose().times(D));			
 			constant += (U.transpose().times(d)).get(0, 0);
 //		}
-		for (GRBVar var: SP.getVars()){
-			int index = varHash.get(var.get(GRB.StringAttr.VarName));
-			var.set(GRB.DoubleAttr.Obj, updatedC.getArray()[0][index]);
+		GRBVar var;
+		for (int i = 0 ; i < nVar - N ; i++){
+			var = SP.getVar(i);
+			var.set(GRB.DoubleAttr.Obj, updatedC.getArray()[0][getCol(var)]);
+		}
+		for (int i = 0 ; i < N ; i++){
+			var = SP.getVar(nVar-i-1);
+			var.set(GRB.DoubleAttr.Obj, updatedC.getArray()[0][getLocCol(var)]);
 		}
 		SP.set(GRB.DoubleAttr.ObjCon, constant);		
 	}
@@ -234,6 +237,36 @@ public class LR_Main {
 	}
 	
 	/**
+	 * Gets the column number of routing variables.
+	 * @param var
+	 * @return int
+	 * @throws GRBException
+	 */
+	private static int getCol(GRBVar var) throws GRBException{
+		VarIndices varIndices = new VarIndices(var);
+		int _R = R+1;
+		int lambda = N * _R * (N-1) + _R*(N-1) + _R;    // Index j increments every lambda iterations.
+		int output = 0;
+		for (int i = 0 ; i < varIndices.i; i++){
+			output += (N-i-1) * lambda;
+		}		
+		output += (varIndices.j - varIndices.i -1) * lambda + (N*_R*varIndices.k) + (_R*varIndices.m) + varIndices.r;		
+		return output;
+	}
+	
+	/**
+	 * Get the column number of location variables.
+	 * @param var
+	 * @return int
+	 * @throws NumberFormatException
+	 * @throws GRBException
+	 */
+	private static int getLocCol(GRBVar var) throws NumberFormatException, GRBException{
+		int output = (N*(N-1)/2*N*N*(R+1));
+		return output + Integer.parseInt(var.get(GRB.StringAttr.VarName));
+	}
+	
+	/**
 	 * Updates the miu based on the  rule (c)
 	 * @param model
 	 * @param varHash
@@ -270,21 +303,6 @@ public class LR_Main {
 	 */
 	protected static Matrix updateU(GRBModel SP, double miu, Matrix U, Matrix d, Matrix D) throws GRBException{
 		Matrix X = getVarsMatrix(SP);
-		/*for (GRBVar var:SP.getVars()){
-			if (var.get(GRB.DoubleAttr.X)>0){
-				int col = varHash.get(var.get(GRB.StringAttr.VarName));
-				String name = var.get(GRB.StringAttr.VarName);
-				double value = X.get(0, col);
-				System.out.println(col + " - " + name + " - " + value);
-			}			
-		}
-		
-		for (int i = 0 ; i < D.getColumnDimension() ; i++){
-			if (D.get(0,i) != 0 ){
-				System.out.print(D.get(0,i) + " - " + i + " | ");
-			}
-		}*/
-		
 		Matrix output = D.times(X.transpose());		
 		output = d.minus(output);
 		output = U.minus(output.times(miu));
@@ -306,8 +324,13 @@ public class LR_Main {
 	 */
 	private static Matrix getVarsMatrix(GRBModel model) throws GRBException{
 		Matrix output = new Matrix(1, model.get(GRB.IntAttr.NumVars));
-		for (GRBVar var:model.getVars()){
-			output.set(0, varHash.get(var.get(GRB.StringAttr.VarName)), var.get(GRB.DoubleAttr.X));;			
+		for (int i = 0 ; i < nVar-N ; i++){
+			GRBVar var = model.getVar(i);
+			output.set(0, getCol(var), var.get(GRB.DoubleAttr.X));			
+		}
+		for (int i = 0 ; i < N ; i++){
+			GRBVar var = model.getVar(nVar - i - 1);
+			output.set(0, getLocCol(var), var.get(GRB.DoubleAttr.X));
 		}
 		return output;
 	}
@@ -359,20 +382,10 @@ public class LR_Main {
 			}
 		}
 		
-		/*for (int i = 1, j = N-1 ; i<=N ; i++,j--){
-			GRBVar var = OP.getVar(nVar-i);
-			System.out.println(var.get(GRB.StringAttr.VarName));
-			System.out.println(flowSumOfHubs[j]);
-		}*/
-		
 		double largestFlow = -1 * GRB.INFINITY;
 		GRBVar branchVar = y.get(0);
-		for ( GRBVar var : y ){			
-			
-			StringBuilder varName = new StringBuilder(var.get(GRB.StringAttr.VarName));
-			varName.deleteCharAt(0);
-			int varNo = Integer.parseInt(varName.toString());
-			if (var.get(GRB.DoubleAttr.X)==1 && flowSumOfHubs[varNo]>largestFlow){
+		for ( GRBVar var : y ){		
+			if (var.get(GRB.DoubleAttr.X)==1 && flowSumOfHubs[Integer.parseInt(var.get(GRB.StringAttr.VarName))]>largestFlow){
 				branchVar = var;
 			}
 		}
@@ -431,7 +444,6 @@ public class LR_Main {
 	 */
 	public static BenefitList computeBenefits(GRBModel model, GRBVar[][][][][] x, GRBVar[] y) throws GRBException{
 		BenefitList output = new BenefitList();
-//		BenefitList.Benefit[] benefits = new BenefitList.Benefit[N];
 		double benefit;
 		
 		// computing benefits
@@ -506,16 +518,8 @@ public class LR_Main {
 		N1 = new ArrayList<GRBVar>();
 		int col;
 		double criteria;
-		int cntr = 0;
 		for (GRBVar var:vars){
-			col = varHash.get(var.get(GRB.StringAttr.VarName)); // column index of the variable
-			String s = var.get(GRB.StringAttr.VarName);
-			Matrix temp = new Matrix(Us.getRowDimension(), Us.getColumnDimension());
-			temp = Ds.getMatrix(0, Ds.getRowDimension()-1, col, col);
-			temp = Us.arrayTimes(temp);
-			double d = sumElements(temp);
-			double k = C.get(0,varHash.get(var.get(GRB.StringAttr.VarName)));
-			double crt = k-d;
+			col = getCol(var); // column index of the variable
 			criteria = C.get(0, col)-sumElements(Us.arrayTimes(Ds.getMatrix(0, Ds.getRowDimension()-1, col, col)));
 			System.out.println(criteria);
 			if (criteria > 0)
@@ -540,25 +544,25 @@ public class LR_Main {
 		double statement1 = sumElements(Us);  // The first statement in the variable fixing formula
 		double statement2 = 0;  // The second statement in the variable fixing formula
 		for (GRBVar var : N0){
-			int col = varHash.get(var.get(GRB.StringAttr.VarName));
+			int col = getCol(var);
 			statement2 += var.get(GRB.DoubleAttr.Obj) /*C.get(0,col)*/ - sumElements(Us.arrayTimes(Ds.getMatrix(0, rowSize, col, col)));			
 		}
 		
 		// Defining variables to be fixed to 0
 		for (GRBVar var : N1){			
-			int col = varHash.get(var.get(GRB.StringAttr.VarName));
+			int col = getCol(var);
 			criteria = statement1 + statement2 + var.get(GRB.DoubleAttr.Obj) /*C.get(0, col)*/ - sumElements(Us.arrayTimes(Ds.getMatrix(0, rowSize, col, col)));
 			System.out.println("cri: "+ criteria);
-			if (criteria >= z) {fixTo0.add(var);/* System.out.println(var.get(GRB.StringAttr.VarName));*/}
+			if (criteria >= z) fixTo0.add(var);
 			}
 		// Defining variables to be fixed to 1
 		double statement2_2;
 		for (GRBVar var : N0){			
-			int col = varHash.get(var.get(GRB.StringAttr.VarName));
+			int col = getCol(var);
 			statement2_2 = statement2 - C.get(0,col) + sumElements(Us.arrayTimes(Ds.getMatrix(0, rowSize, col, col)));
 			criteria = statement1 + statement2_2;	
 			System.out.println("cri: "+ criteria);
-			if (criteria >= z) {fixTo1.add(var); /*System.out.println(var.get(GRB.StringAttr.VarName));*/}
+			if (criteria >= z) fixTo1.add(var);
 		}		
 	}
 	
@@ -667,24 +671,9 @@ public class LR_Main {
 			for (int j = i + 1; j < N; j++) {
 				for (int k = 0; k < N; k++) {
 					for (int m = 0; m < N; m++) {
-						String varName = "x" + i + "_" + k + "_" + m + "_"
-								+ j + "_0";
-						x[i][k][m][j][0] = SP.addVar(0.0, GRB.INFINITY, 0.0,
-								GRB.BINARY, varName);
-						x0[i][k][m][j][0] = OP.addVar(0.0, GRB.INFINITY, 0.0,
-								GRB.BINARY, varName);
-					}
-				}
-			}
-		}		
-
-		for (int i = 0; i < N; i++) {
-			for (int j = i + 1; j < N; j++) {
-				for (int k = 0; k < N; k++) {
-					for (int m = 0; m < N; m++) {
-						for (int r = 1; r <= R; r++){
-							String varName = "x" + i + "_" + k + "_" + m
-									+ "_" + j + "_" + r;
+						for (int r = 0; r <= R; r++){
+							String varName = i + "_" + k + "_" + m + "_"
+									+ j + "_" + r;
 							x[i][k][m][j][r] = SP.addVar(0.0, GRB.INFINITY, 0.0,
 									GRB.BINARY, varName);
 							x0[i][k][m][j][r] = OP.addVar(0.0, GRB.INFINITY, 0.0,
@@ -693,27 +682,15 @@ public class LR_Main {
 					}
 				}
 			}
-		}
+		}		
 
 		for (int i = 0; i < N; i++) {
-			y[i] = SP.addVar(0, GRB.INFINITY, 0, GRB.BINARY, "y" + i);
-			y0[i] = OP.addVar(0, GRB.INFINITY, 0, GRB.BINARY, "y" + i);
+			y[i] = SP.addVar(0, GRB.INFINITY, 0, GRB.BINARY, ""+i);
+			y0[i] = OP.addVar(0, GRB.INFINITY, 0, GRB.BINARY, ""+i);
 		}
 		
 		OP.update();
 		SP.update();
-		
-		// creating variables hashMap for subproblem
-		int cntr = 0;
-		for (GRBVar var: OP.getVars()){
-			varHash0.put(var.get(GRB.StringAttr.VarName), cntr++);			
-		}
-				
-		// creating variables hashMap for subproblem
-		cntr = 0;
-		for (GRBVar var: SP.getVars()){
-			varHash.put(var.get(GRB.StringAttr.VarName), cntr++);			
-		}
 		
 		// obj function declaration
 		GRBLinExpr expr0 = new GRBLinExpr();
@@ -725,7 +702,7 @@ public class LR_Main {
 						double CoEf = -1 * flows[i][j] * Cikmj(i, k, m, j) * (1 - Q(i,k,m,j));
 						expr0.addTerm(CoEf, x0[i][k][m][j][0]);
 						expr.addTerm(CoEf, x[i][k][m][j][0]);
-						C.set(0, varHash.get(x[i][k][m][j][0].get(GRB.StringAttr.VarName)), CoEf);
+						C.set(0, getCol(x[i][k][m][j][0]), CoEf);
 					}
 				}
 			}
@@ -739,7 +716,7 @@ public class LR_Main {
 							double CoEf = -1 * flows[i][j] * Cikmj(i, k, m, j) * Math.pow(q, Math.floor(Math.log(r+1)/Math.log(2)));
 							expr0.addTerm(CoEf, x0[i][k][m][j][r]);
 							expr.addTerm(CoEf, x[i][k][m][j][r]);
-							C.set(0, varHash.get(x[i][k][m][j][r].get(GRB.StringAttr.VarName)), CoEf);
+							C.set(0, getCol(x[i][k][m][j][r]), CoEf);
 						}
 					}
 				}
@@ -762,7 +739,7 @@ public class LR_Main {
 		SP.addConstr(con2, GRB.EQUAL, P, "u2");
 
 		// Constraint 3
-		cntr = 0;
+		int cntr = 0;
 		for (int i = 0; i < N; i++) {
 			for (int j = i + 1; j < N; j++) {
 
@@ -842,13 +819,13 @@ public class LR_Main {
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
 							if (k != i && m != i) {
-								D6.set(cntr, varHash.get(x[i][k][m][j][r].get(GRB.StringAttr.VarName)), 1);
+								D6.set(cntr, getCol(x[i][k][m][j][r]), 1);
 								con6_0.addTerm(1, x0[i][k][m][j][r]);
 								con6.addTerm(1, x[i][k][m][j][r]);
 							}
 						}
 					}
-					D6.set(cntr, varHash.get(y[i].get(GRB.StringAttr.VarName)),M);
+					D6.set(cntr, getLocCol(y[i]),M);
 					d6.set(cntr, 0, M);
 					con6_0.addTerm(M, y0[i]);
 					con6.addTerm(M, y[i]);
@@ -872,13 +849,13 @@ public class LR_Main {
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
 							if (k != j && m != j) {
-								D7.set(cntr, varHash.get(x[i][k][m][j][r].get(GRB.StringAttr.VarName)), 1);
+								D7.set(cntr, getCol(x[i][k][m][j][r]), 1);
 								con7_0.addTerm(1, x0[i][k][m][j][r]);
 								con7.addTerm(1, x[i][k][m][j][r]);
 							}
 						}
 					}
-					D7.set(cntr,varHash.get(y[j].get(GRB.StringAttr.VarName)),M);
+					D7.set(cntr,getLocCol(y[j]),M);
 					d7.set(cntr, 0, M);
 					con7_0.addTerm(M, y0[j]);
 					con7.addTerm(M, y[j]);
@@ -902,8 +879,8 @@ public class LR_Main {
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
 							if (k != i && k != j) {
-								D8.set(cntr, varHash.get(x[i][k][m][j][r].get(GRB.StringAttr.VarName)), 1);
-								if (r==0 && i == 0 && j == 1) System.out.println(x[i][k][m][j][r].get(GRB.StringAttr.VarName) + ": CoEf="+1+" - row="+cntr+" - col="+ varHash.get(x[i][k][m][j][r].get(GRB.StringAttr.VarName)));
+								D8.set(cntr, getCol(x[i][k][m][j][r]), 1);
+								if (r==0 && i == 0 && j == 1) System.out.println(x[i][k][m][j][r].get(GRB.StringAttr.VarName) + ": CoEf="+1+" - row="+cntr+" - col="+ getCol(x[i][k][m][j][r]));
 								con8_0.addTerm(1, x0[i][k][m][j][r]);
 								con8.addTerm(1, x[i][k][m][j][r]);
 							}
@@ -912,8 +889,8 @@ public class LR_Main {
 					
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
-							D8.set(cntr, varHash.get(x[i][k][m][j][2 * r + 1].get(GRB.StringAttr.VarName)), -1);
-							if (r==0 && i == 0 && j == 1) System.out.println(x[i][k][m][j][2 * r + 1].get(GRB.StringAttr.VarName) + ": CoEf= -1"+" - row="+cntr+" - col="+ varHash.get(x[i][k][m][j][2 * r +1].get(GRB.StringAttr.VarName)));
+							D8.set(cntr, getCol(x[i][k][m][j][2 * r + 1]), -1);
+							if (r==0 && i == 0 && j == 1) System.out.println(x[i][k][m][j][2 * r + 1].get(GRB.StringAttr.VarName) + ": CoEf= -1"+" - row="+cntr+" - col="+ getCol(x[i][k][m][j][2 * r +1]));
 							con8_0.addTerm(-1, x0[i][k][m][j][2 * r + 1]);  // Left child node
 							con8.addTerm(-1, x[i][k][m][j][2 * r + 1]);  // Left child node
 						}
@@ -939,7 +916,7 @@ public class LR_Main {
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
 							if (m!=i && m!=j){
-								D9.set(cntr, varHash.get(x[i][k][m][j][r].get(GRB.StringAttr.VarName)),1);
+								D9.set(cntr, getCol(x[i][k][m][j][r]),1);
 								con9_0.addTerm(1, x0[i][k][m][j][r]);
 								con9.addTerm(1, x[i][k][m][j][r]);
 							}
@@ -948,7 +925,7 @@ public class LR_Main {
 					
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {							
-							D9.set(cntr, varHash.get(x[i][k][m][j][2 * r + 2].get(GRB.StringAttr.VarName)), -1);
+							D9.set(cntr, getCol(x[i][k][m][j][2 * r + 2]), -1);
 							con9_0.addTerm(-1, x0[i][k][m][j][2 * r + 2]);
 							con9.addTerm(-1, x[i][k][m][j][2 * r + 2]);
 						}
@@ -974,8 +951,8 @@ public class LR_Main {
 						GRBLinExpr con10 = new GRBLinExpr();
 						for (int s:BinaryTree.getLeftChildren(r, D)){
 							for (int m=0; m<N; m++){
-								D10.set(cntr, varHash.get(x[i][k][m][j][s].get(GRB.StringAttr.VarName)), 1);
-								D10.set(cntr, varHash.get(x[i][m][k][j][s].get(GRB.StringAttr.VarName)), 1);
+								D10.set(cntr, getCol(x[i][k][m][j][s]), 1);
+								D10.set(cntr, getCol(x[i][m][k][j][s]), 1);
 								con10_0.addTerm(1, x0[i][k][m][j][s]);
 								con10_0.addTerm(1, x0[i][m][k][j][s]);
 								con10.addTerm(1, x[i][k][m][j][s]);
@@ -983,7 +960,7 @@ public class LR_Main {
 							}
 						}
 						for (int m=0; m<N; m++){
-							D10.set(cntr, varHash.get(x[i][k][m][j][r].get(GRB.StringAttr.VarName)), M);
+							D10.set(cntr, getCol(x[i][k][m][j][r]), M);
 							con10_0.addTerm(M , x0[i][k][m][j][r]);
 							con10.addTerm(M , x[i][k][m][j][r]);
 						}
@@ -1008,8 +985,8 @@ public class LR_Main {
 						GRBLinExpr con11 = new GRBLinExpr();
 						for (int s : BinaryTree.getRightChildren(r, D)) {
 							for (int k = 0; k < N; k++) {
-								D11.set(cntr, varHash.get(x[i][k][m][j][s].get(GRB.StringAttr.VarName)), 1);
-								D11.set(cntr, varHash.get(x[i][m][k][j][s].get(GRB.StringAttr.VarName)), 1);
+								D11.set(cntr, getCol(x[i][k][m][j][s]), 1);
+								D11.set(cntr, getCol(x[i][m][k][j][s]), 1);
 								con11_0.addTerm(1, x0[i][k][m][j][s]);
 								con11_0.addTerm(1, x0[i][m][k][j][s]);
 								con11.addTerm(1, x[i][k][m][j][s]);
@@ -1017,7 +994,7 @@ public class LR_Main {
 							}
 						}
 						for (int k = 0; k < N; k++) {
-							D11.set(cntr, varHash.get(x[i][k][m][j][r].get(GRB.StringAttr.VarName)), M);
+							D11.set(cntr, getCol(x[i][k][m][j][r]), M);
 							con11_0.addTerm(M, x0[i][k][m][j][r]);
 							con11.addTerm(M, x[i][k][m][j][r]);
 						}
@@ -1027,7 +1004,6 @@ public class LR_Main {
 				}
 			}
 		}
-
 		/*
 		 * Lagrangian Relaxation Algorithm starts:
 		 */
@@ -1206,7 +1182,6 @@ public class LR_Main {
 			printSol(OP);
 			X = getVarsMatrix(OP);
 		}*/
-		
 	}
 
 }
