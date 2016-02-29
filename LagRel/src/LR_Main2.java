@@ -36,14 +36,14 @@ public class LR_Main2 {
 	private static double UB;
 	private static LB LB;
 	private static double bestUB = GRB.INFINITY;
-	private static double bestLB = -1 * GRB.INFINITY;
+	private static double bestGlobalLB = -1 * GRB.INFINITY;
 	private static double bestGap = GRB.INFINITY;	//stores the best gap found in the root node.
 	private final static double gap = 0.01; // Termination criteria: the difference between the 
 											// last obtained objective function value and the second to the last
 	
 	// Branch and Bound attributes
-	private static int nodesItrNum = 8;
-	private static int rootItrNum = 15;
+	private static int nodesItrNum = 5;
+	private static int rootItrNum = 10;
 	private static List<BBNode2> unexploredNodes = new ArrayList<BBNode2>();
 	private static BBNode2 bestNode;
 	private static PriorityQueue<BBNode2> BBNodeList = new PriorityQueue<BBNode2>();
@@ -117,8 +117,8 @@ public class LR_Main2 {
 	 * Updates the bestLB found so far.
 	 * @param x
 	 */
-	protected static void updateLB(double x){
-		if (x > bestLB) bestLB = x;
+	protected static void updateGlobalLB(double x){
+		if (x > bestGlobalLB) bestGlobalLB = x;
 	}
 	
 	/**
@@ -220,7 +220,7 @@ public class LR_Main2 {
 			if (slack.get(GRB.DoubleAttr.X) < M/2)
 				denuminator += Math.pow(slack.get(GRB.DoubleAttr.X), 2);
 		}
-		double output = epsilon*(UB - bestLB)/denuminator;
+		double output = epsilon*(UB - bestGlobalLB)/denuminator;
 		return output;
 	}
 	
@@ -950,7 +950,7 @@ public class LR_Main2 {
 		LB = obtainLB(OP, SP);
 		UB = SP.get(GRB.DoubleAttr.ObjVal);
 		
-		updateLB(LB.value);
+		updateGlobalLB(LB.value);
 		System.out.println(SP.get(GRB.IntAttr.NumConstrs));
 		System.out.println(OP.get(GRB.IntAttr.NumConstrs));
 
@@ -959,7 +959,7 @@ public class LR_Main2 {
 		cntr = 0;
 		double epsilon = 2;
 		double currentGap = GRB.INFINITY;
-		while(currentGap > gap && (k<rootItrNum || /*LB.value != bestLB*/ currentGap!=bestGap)){
+		while(currentGap > gap && (k<rootItrNum || LB.value != bestGlobalLB /*currentGap!=bestGap*/)){
 			if (dissectEpsilon(cntr, 10)){
 				epsilon = epsilon/2;
 				cntr = 0;
@@ -972,9 +972,9 @@ public class LR_Main2 {
 			cntr = updateUB(cntr, UB);
 //			computeBenefits(OP,x);
 			LB = obtainLB(OP, SP);
-			updateLB(LB.value);   // update best LB
+			updateGlobalLB(LB.value);   // update best LB
 			k++;	// Counter update
-			currentGap = Math.abs((UB - LB.value)/bestLB);
+			currentGap = Math.abs((UB - bestGlobalLB)/bestGlobalLB);
 			bestGap = updateBestGap(currentGap);
 			System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB + " - Gap = " + currentGap + " - sol: " + printSol2(SP) + " - eps: " + epsilon);
 		}	
@@ -1029,7 +1029,7 @@ public class LR_Main2 {
 		 * B&B procedure 2 
 		 */
 		
-		BBNode2 rootNode = new BBNode2(0, slacks, Us, LB, UB, selectedLocations, epsilon);
+		BBNode2 rootNode = new BBNode2(0, slacks, Us, bestGlobalLB, UB, selectedLocations, epsilon);
 		bestNode = rootNode;
 		List<GRBVar> unfixedVars;
 		unexploredNodes.add(rootNode);
@@ -1041,9 +1041,9 @@ public class LR_Main2 {
 			
 			BBNode2 parent = unexploredNodes.get(0);
 			if (!parent.fathom){
-				BBNode2 rightChild = new BBNode2(2*parent.ind+2, N, parent.slacks, parent.Us, OP, SP, bestLB, 
+				BBNode2 rightChild = new BBNode2(2*parent.ind+2, N, parent.slacks, parent.Us, OP, SP, bestGlobalLB, 
 						parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, true, parent.epsilon, nodesItrNum);
-				rightChild.updateFathom(P, N);
+				rightChild.updateFathom(P, N, bestGlobalLB);
 				if (!rightChild.fathom){
 					unfixedVars = getUnfixedVars(y, rightChild);
 					rightChild.varToFix = getBranchVar(x, unfixedVars);
@@ -1055,12 +1055,9 @@ public class LR_Main2 {
 				LR_Main2.relaxVar(SP, rightChild.noOfFixedVars);
 				printNode(rightChild);
 				
-				if (parent.Us == null) {
-					System.out.println();
-				}
-				BBNode2 leftChild = new BBNode2(2*parent.ind+1, N, parent.slacks, parent.Us, OP, SP, bestLB, 
+				BBNode2 leftChild = new BBNode2(2*parent.ind+1, N, parent.slacks, parent.Us, OP, SP, bestGlobalLB, 
 						parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, false, parent.epsilon, nodesItrNum);
-				leftChild.updateFathom(P, N);
+				leftChild.updateFathom(P, N, bestGlobalLB);
 				if (!leftChild.fathom){
 					unfixedVars = getUnfixedVars(y, leftChild);
 					leftChild.varToFix = getBranchVar(x, unfixedVars);

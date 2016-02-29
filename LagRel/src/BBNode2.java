@@ -16,7 +16,7 @@ public class BBNode2 implements Comparable<BBNode2> {
 	public boolean fathom = false;
 	public LB lb = new LB(-1*GRB.INFINITY);
 	public double UB = GRB.INFINITY;
-	public double bestLB;
+	public double bestLB = -1 * GRB.INFINITY;
 	public double bestUB = GRB.INFINITY;
 	public List<String> selectedLocations = new ArrayList<String>();
 	public double gap = GRB.INFINITY;
@@ -39,16 +39,15 @@ public class BBNode2 implements Comparable<BBNode2> {
 	 * @param selectedLocations
 	 * @throws GRBException
 	 */
-	public BBNode2(int ind, List<GRBVar> slacks, List<Double> Us, LB LB, double UB, List<String> selectedLocations, double epsilon) throws GRBException{
+	public BBNode2(int ind, List<GRBVar> slacks, List<Double> Us, double bestGolbalLB, double UB, List<String> selectedLocations, double epsilon) throws GRBException{
 		this.ind = ind;
 		this.slacks = slacks;
 		this.Us = Us;
 		this.nodesBestUs = Us;
-		this.bestLB = LB.value;
 		this.UB = UB; 
 		this.selectedLocations = selectedLocations;
 		this.epsilon = epsilon;
-		updateGap();
+		this.gap = Math.abs((this.UB - bestGolbalLB)/bestGolbalLB);
 	}
 	
 	/**
@@ -66,13 +65,12 @@ public class BBNode2 implements Comparable<BBNode2> {
 	 * @param valueToFix
 	 * @throws GRBException
 	 */
-	public BBNode2(int ind, int N, List<GRBVar> slacks, List<Double> Us, GRBModel OP, GRBModel SP, double bestLB,
+	public BBNode2(int ind, int N, List<GRBVar> slacks, List<Double> Us, GRBModel OP, GRBModel SP, double bestGlobalLB,
 			List<GRBVar> fixTo1, List<GRBVar> fixTo0, GRBVar varToFix, boolean valueToFix, double epsilon, int itrNum) throws GRBException{
 		this.ind = ind;
 		this.slacks = slacks;
 		this.Us = Us;
 		this.nodesBestUs = this.Us;
-		this.bestLB = bestLB;
 		this.epsilon = epsilon;
 		this.varsFixedTo0.addAll(fixTo0);
 		this.varsFixedTo1.addAll(fixTo1);
@@ -87,7 +85,9 @@ public class BBNode2 implements Comparable<BBNode2> {
 		int cntr = 0;
 		int k = 0;
 		SP.optimize();
-		if (SP.get(GRB.IntAttr.Status) != 3){  // Model feasibility check
+		
+		if (SP.get(GRB.IntAttr.Status) == 2 ){  // Model feasibility check
+			double currentGap;
 			UB = SP.get(GRB.DoubleAttr.ObjVal);
 			while(/*this.gap > optGap &&*/ k<itrNum){
 				if (LR_Main2.dissectEpsilon(cntr, 3)){
@@ -99,8 +99,9 @@ public class BBNode2 implements Comparable<BBNode2> {
 				LR_Main2.updateObjCoeffs(this.slacks, this.Us);	// Update obj fun coefficients
 				SP.optimize();
 				UB = SP.get(GRB.DoubleAttr.ObjVal);
-				if (UB<this.bestUB){
-					this.bestUB = UB;
+				currentGap = Math.abs((UB-bestGlobalLB)/bestGlobalLB);
+				if (currentGap<this.gap){
+					this.gap = currentGap;
 					cntr = 0;
 				}else{
 					cntr++;
@@ -112,9 +113,10 @@ public class BBNode2 implements Comparable<BBNode2> {
 						this.selectedLocations.add(var.get(GRB.StringAttr.VarName));					
 				}
 				lb = LR_Main2.obtainLB(OP, SP);
-				LR_Main2.updateLB(lb.value);
+				LR_Main2.updateGlobalLB(lb.value);
+				updateLB(lb.value);
 				k++;							// Counter update
-				updateGap();	
+					
 				updateBestResult(this.lb, this.UB, this.Us, this.selectedLocations);
 				System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + lb.value + " - UB= " + UB + " - gap= " + this.gap +  " - eps= " + LR_Main.epsilon);
 			}
@@ -124,6 +126,11 @@ public class BBNode2 implements Comparable<BBNode2> {
 		}			
 
 		noOfFixedVars = this.varsFixedTo0.size() + this.varsFixedTo1.size();		
+	}
+	
+	private void updateLB(double lb){
+		if (lb < this.bestLB)
+			this.bestLB = lb;
 	}
 	
 	private void updateNode(double bestBB_UB, LB bestBB_LB, List<Double> bestBB_Us, List<String> bestBB_selectedLocations){
@@ -146,19 +153,12 @@ public class BBNode2 implements Comparable<BBNode2> {
 	}
 	
 	/**
-	 * updates the gap between the UB and LB found in the node.
-	 */
-	public void updateGap(){
-		this.gap = Math.abs((UB - lb.value)/bestLB);
-	}
-	
-	/**
 	 * Checks the upper bound of the node with the given LB and fathoms the node
 	 * if the UB is less than or equal to LB
 	 * @param LB - Lower Bound
 	 */
-	public void updateFathom(int P, int N){
-		if (this.lb.value < bestLB 
+	public void updateFathom(int P, int N, double bestGlobalLB){
+		if (this.lb.value < bestGlobalLB 
 				|| this.varsFixedTo1.size() >= P
 				|| (N-this.varsFixedTo0.size()) < P) this.fathom = true;
 	}
