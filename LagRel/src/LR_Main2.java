@@ -12,7 +12,7 @@ import java.util.Queue;
 import Jama.Matrix;
 import gurobi.*;
 
-public class LR_Main {
+public class LR_Main2 {
 	// formulation attributes
 	private static double alpha = 0.2;
 	private static double[][] tmpFlows = MyArray.read("w.txt");
@@ -20,36 +20,34 @@ public class LR_Main {
 	private static double[][] distances = Distance.get(coordinates);
 	private static int N = tmpFlows.length;
 	private static double[][] flows = new double[N][N];
-	private static int D = 2; // Maximum number of simultaneous disruptions
+	private static int D = 3; // Maximum number of simultaneous disruptions
 	private static int R = (int) Math.pow(2, D + 1) - 2; // Largest index in the
 															// full binary tree
 	private static double q = 0.3;
-	private static int P = 3; // number of hubs to be located
+	private static int P = 4; // number of hubs to be located
 	private static int M = N * R; // the big M
 	private static int nVar = (int) (N + (Math.pow(N, 3)*(N-1)*(R+1)/2)); // Total number of variables in the model
 	
 	// Lagrangian Relaxation algorithm attributes
 	private static GRBModel SP;	// Sub problem
 	private static GRBModel OP;	// Original problem
-	private static Matrix Us;
-	private static Matrix Ds;
-	private static Matrix ds;
-	private static Matrix C = new Matrix(1,(int) ((Math.pow(N, 3)*(N-1)*(R+1)/2)+N));
 	private static int k = 0;
 	private static double miu = 6;
-	protected static double epsilon = 2;
 	private static double UB;
 	private static LB LB;
 	private static double bestUB = GRB.INFINITY;
 	private static double bestLB = -1 * GRB.INFINITY;
-	private final static double gap = 0.05; // Termination criteria: the difference between the 
+	private static double bestGap = GRB.INFINITY;	//stores the best gap found in the root node.
+	private final static double gap = 0.01; // Termination criteria: the difference between the 
 											// last obtained objective function value and the second to the last
 	
 	// Branch and Bound attributes
-//	private static List<BBNode> exploredNodes = new ArrayList<BBNode>();
-	private static List<BBNode> unexploredNodes = new ArrayList<BBNode>();
-	private static BBNode bestNode;
-	private static PriorityQueue<BBNode> BBNodeList = new PriorityQueue<BBNode>();
+	private static int nodesItrNum = 8;
+	private static int rootItrNum = 15;
+	private static List<BBNode2> unexploredNodes = new ArrayList<BBNode2>();
+	private static BBNode2 bestNode;
+	private static PriorityQueue<BBNode2> BBNodeList = new PriorityQueue<BBNode2>();
+	
 	
 	// Variable fixing attributes
 	private static double z; // incumbent value for variable fixing
@@ -141,12 +139,10 @@ public class LR_Main {
 	/**
 	 * Halves the epsilon and resets the counter if the threshold is met
 	 */
-	protected static int dissectEpsilon(int counter, int threshold){
-		if (counter >= threshold){
-			epsilon = epsilon/2;
-			counter = 0;
-		}
-		return counter;		 
+	protected static boolean dissectEpsilon(int counter, int threshold){
+		if (counter >= threshold)
+			return true;
+		return false;		 
 	}
 	
 	/**
@@ -167,7 +163,8 @@ public class LR_Main {
 	 * @throws GRBException
 	 */
 	protected static String printSol2(GRBModel model) throws GRBException{
-		String output = "values: ";
+		int nVar = model.get(GRB.IntAttr.NumVars);
+		String output = "";
 		for (int i = 0 ; i < N ; i++){
 			GRBVar var = model.getVar(nVar-i-1);
 			if (var.get(GRB.DoubleAttr.X) > 0)
@@ -178,29 +175,20 @@ public class LR_Main {
 	
 	/**
 	 * Updates the objective function coefficients based on the Lagrangian Multipliers put in.
-	 * @param U
-	 * @param d
-	 * @param D
+	 * @param slacks
+	 * @param Us
 	 * @throws GRBException
 	 */
-	protected static void updateObjCoeffs(GRBModel SP, Matrix U, Matrix d, Matrix D) throws GRBException{
-		double[][] temp =  C.getArrayCopy();
-		Matrix updatedC = new Matrix(temp);
-		double constant = 0;
-//		for (int i = 0 ; i<U.size() ; i++){
-			updatedC = updatedC.minus(U.transpose().times(D));			
-			constant += (U.transpose().times(d)).get(0, 0);
-//		}
-		GRBVar var;
-		for (int i = 0 ; i < nVar - N ; i++){
-			var = SP.getVar(i);
-			var.set(GRB.DoubleAttr.Obj, updatedC.getArray()[0][getCol(var)]);
-		}
-		for (int i = 0 ; i < N ; i++){
-			var = SP.getVar(nVar-i-1);
-			var.set(GRB.DoubleAttr.Obj, updatedC.getArray()[0][getLocCol(var)]);
-		}
-		SP.set(GRB.DoubleAttr.ObjCon, constant);		
+	protected static void updateObjCoeffs(List<GRBVar> slacks, List<Double> Us) throws GRBException{
+		for (int i = 0 ; i < slacks.size() ; i++)
+			slacks.get(i).set(GRB.DoubleAttr.Obj, Us.get(i));
+		/*for (int i =0 ; i < N ; i++){
+			for (int j = i+1 ; j < N ; j++){
+				for (int r = 0 ; r <= Math.pow(2, D) - 2 ; r++){
+					slacks[i][j][r].set(GRB.DoubleAttr.Obj, Us[i][j][r]);
+				}
+			}
+		}*/
 	}
 
 	/**
@@ -214,59 +202,8 @@ public class LR_Main {
 		miu = miu* Math.pow(0.99,itr);
 		return miu;
 	}
-	
-	/**
-	 * Concatenates a list of matrices horizontally
-	 * @param x
-	 * @return
-	 */
-	private static Matrix concatH(List<Matrix> x){
-		int colDim = x.get(0).getColumnDimension(); // column dimension of the output matrix
-		int rowDim = 0;	// row dimension of the output matrix
-		for (Matrix i:x){
-			rowDim += i.getRowDimension();
-		}
-		Matrix output = new Matrix(rowDim, colDim);
-		int i0;
-		int i1 = -1;
-		for (Matrix i:x){
-			i0 = i1+1;
-			i1 = i1 + i.getRowDimension();
-			output.setMatrix(i0, i1, 0, colDim-1, i);			
-		}
-		return output;
-	}
-	
-	/**
-	 * Gets the column number of routing variables.
-	 * @param var
-	 * @return int
-	 * @throws GRBException
-	 */
-	private static int getCol(GRBVar var) throws GRBException{
-		VarIndices varIndices = new VarIndices(var);
-		int _R = R+1;
-		int lambda = N * _R * (N-1) + _R*(N-1) + _R;    // Index j increments every lambda iterations.
-		int output = 0;
-		for (int i = 0 ; i < varIndices.i; i++){
-			output += (N-i-1) * lambda;
-		}		
-		output += (varIndices.j - varIndices.i -1) * lambda + (N*_R*varIndices.k) + (_R*varIndices.m) + varIndices.r;		
-		return output;
-	}
-	
-	/**
-	 * Get the column number of location variables.
-	 * @param var
-	 * @return int
-	 * @throws NumberFormatException
-	 * @throws GRBException
-	 */
-	private static int getLocCol(GRBVar var) throws NumberFormatException, GRBException{
-		int output = (N*(N-1)/2*N*N*(R+1));
-		return output + Integer.parseInt(var.get(GRB.StringAttr.VarName));
-	}
-	
+
+
 	/**
 	 * Updates the miu based on the  rule (c)
 	 * @param model
@@ -277,75 +214,26 @@ public class LR_Main {
 	 * @return
 	 * @throws GRBException 
 	 */
-	protected static double updateMiuC(Matrix D, Matrix d) throws GRBException{
-//		double gap1 = delta2 - delta1;
-		Matrix X = getVarsMatrix(SP);
-		Matrix denuminatorMat = D.times(X.transpose());		
-		denuminatorMat = d.minus(denuminatorMat);
-		double denuminator = Math.pow(denuminatorMat.normF(),2);	 
-		double output = epsilon*(SP.get(GRB.DoubleAttr.ObjVal) - bestLB ) / denuminator;
-//		delta1 = delta2;
-//		delta2 = SP.get(GRB.DoubleAttr.ObjVal) - UB;
-//		double gap2 = delta2 - delta1;
-//		if (gap2>gap1) UB += Math.abs(0.05 * UB);
+	protected static double updateMiuC(List<GRBVar> slacks, double epsilon) throws GRBException{
+		double denuminator = 0;
+		for (GRBVar slack : slacks){
+			if (slack.get(GRB.DoubleAttr.X) < M/2)
+				denuminator += Math.pow(slack.get(GRB.DoubleAttr.X), 2);
+		}
+		double output = epsilon*(UB - bestLB)/denuminator;
 		return output;
 	}
 	
 	/**
 	 * Updates the Lagrangian Multipliers according to the miu.
-	 * @param U
-	 * @param d
-	 * @param D
+	 * @param Us
+	 * @param slack
 	 * @param miu
-	 * @param model
-	 * @param varHash
-	 * @return
 	 * @throws GRBException
 	 */
-	protected static Matrix updateU(GRBModel SP, double miu, Matrix U, Matrix d, Matrix D) throws GRBException{
-		Matrix X = getVarsMatrix(SP);
-		Matrix output = D.times(X.transpose());		
-		output = d.minus(output);
-		output = U.minus(output.times(miu));
-		double[][] u_k = output.getArray();
-		for (int i=0;i<u_k.length;i++){
-			for (int j=0;j<u_k[0].length;j++){
-				u_k[i][j] = (u_k[i][j] > 0) ? u_k[i][j]:0;
-			}
-		}
-		Matrix result = new Matrix(u_k);
-		return result;
-	}
-	
-	/**
-	 * converts the array of Gurobi variables into a 1xn matrix.
-	 * @param vars
-	 * @return
-	 * @throws GRBException
-	 */
-	private static Matrix getVarsMatrix(GRBModel model) throws GRBException{
-		Matrix output = new Matrix(1, model.get(GRB.IntAttr.NumVars));
-		for (int i = 0 ; i < nVar-N ; i++){
-			GRBVar var = model.getVar(i);
-			output.set(0, getCol(var), var.get(GRB.DoubleAttr.X));			
-		}
-		for (int i = 0 ; i < N ; i++){
-			GRBVar var = model.getVar(nVar - i - 1);
-			output.set(0, getLocCol(var), var.get(GRB.DoubleAttr.X));
-		}
-		return output;
-	}
-	
-	/**
-	 * Checks for the termination criteria. If the difference between the last objValue
-	 * and the second last is less than the "gap" the algorithm stops.
-	 * @param newObj
-	 * @param oldObj
-	 * @return true if the termination criteria is not met.
-	 */
-	private static boolean run(double newObj, double oldObj){
-		if (Math.abs(newObj-oldObj) > gap) return true;
-		else return false;		
+	protected static void updateU(List<Double> Us, List<GRBVar> slacks, double miu) throws GRBException{
+		for (int i = 0 ; i < Us.size() ; i++)
+			Us.set(i, Math.max(0, Us.get(i)- miu*slacks.get(i).get(GRB.DoubleAttr.X)));
 	}
 	
 	/*
@@ -353,11 +241,23 @@ public class LR_Main {
 	 */
 	
 	/**
+	 * Updates the smallest gap found so far. 
+	 * @param currentGap
+	 * @return
+	 */
+	public static double updateBestGap(double currentGap){
+		if (currentGap < bestGap)
+			return currentGap;
+		else 
+			return bestGap;
+	}
+	
+	/**
 	 * Prints B&B node attributes
 	 * @param node
 	 * @throws GRBException
 	 */
-	public static void printNode(BBNode node) throws GRBException{
+	public static void printNode(BBNode2 node) throws GRBException{
 		System.out.println("Index: " + node.ind);
 		System.out.println("vars fixed to 1: " + printVarsNames(node.varsFixedTo1));
 		System.out.println("vars fixed to 0: " + printVarsNames(node.varsFixedTo0)) ;
@@ -424,7 +324,7 @@ public class LR_Main {
 	 * Updates the LB by comparing the LB obtained at node
 	 * @param node
 	 */
-	public static void updateLB(BBNode node){
+	public static void updateLB(BBNode2 node){
 		if (node.lb.value>LB.value)
 			LB.value = node.lb.value;
 	}
@@ -436,7 +336,7 @@ public class LR_Main {
 	 * @param node - B&B node
 	 * @return
 	 */
-	public static List<GRBVar> getUnfixedVars(GRBVar[] y, BBNode node){
+	public static List<GRBVar> getUnfixedVars(GRBVar[] y, BBNode2 node){
 		List<GRBVar> output = new ArrayList<GRBVar>();
 		for (int i=0; i<y.length ; i++)
 			output.add(y[i]);
@@ -451,7 +351,7 @@ public class LR_Main {
 	 * its upper bound is greater than the current best node upper bound.
 	 * @param node
 	 */
-	public static void updateBestNode(BBNode node){
+	public static void updateBestNode(BBNode2 node){
 		if (node.UB > bestNode.UB)
 			bestNode = node;
 	}
@@ -521,27 +421,11 @@ public class LR_Main {
 	}
 	
 	/**
-	 * Returns the sum of elements in a matrix.
-	 * @param m
-	 * @return
-	 */
-	private static double sumElements(Matrix m){
-		double[][] arr = m.getArray();
-		double output = 0;
-		for (int i = 0 ; i < arr.length ; i++){
-			for (int j = 0 ; j < arr[0].length ; j++){
-				output += arr[i][j];
-			}
-		}
-		return output;
-	}
-	
-	/**
 	 * Takes a set of GRBVar and assigns them to N1 and N0.
 	 * @param vars
 	 * @throws GRBException
 	 */
-	private static void setN1N0(GRBVar[] vars) throws GRBException{
+/*	private static void setN1N0(GRBVar[] vars) throws GRBException{
 		N0 = new ArrayList<GRBVar>();
 		N1 = new ArrayList<GRBVar>();
 		int col;
@@ -555,7 +439,7 @@ public class LR_Main {
 			else if (criteria < 0)
 				N0.add(var);
 		}
-	}
+	}*/
 	
 	/**
 	 * Defines variables to be fixed
@@ -564,7 +448,7 @@ public class LR_Main {
 	 * @param z The incumbent value
 	 * @throws GRBException 
 	 */
-	private static void varsTobeFixed(List<GRBVar> N1, List<GRBVar> N0, double z) throws GRBException{
+	/*private static void varsTobeFixed(List<GRBVar> N1, List<GRBVar> N0, double z) throws GRBException{
 		fixTo0 = new ArrayList<GRBVar>();
 		fixTo1 = new ArrayList<GRBVar>();
 		int rowSize = Us.getRowDimension()-1; // Number of rows in Us, ds and Ds.
@@ -573,13 +457,13 @@ public class LR_Main {
 		double statement2 = 0;  // The second statement in the variable fixing formula
 		for (GRBVar var : N0){
 			int col = getCol(var);
-			statement2 += var.get(GRB.DoubleAttr.Obj) /*C.get(0,col)*/ - sumElements(Us.arrayTimes(Ds.getMatrix(0, rowSize, col, col)));			
+			statement2 += var.get(GRB.DoubleAttr.Obj) C.get(0,col) - sumElements(Us.arrayTimes(Ds.getMatrix(0, rowSize, col, col)));			
 		}
 		
 		// Defining variables to be fixed to 0
 		for (GRBVar var : N1){			
 			int col = getCol(var);
-			criteria = statement1 + statement2 + var.get(GRB.DoubleAttr.Obj) /*C.get(0, col)*/ - sumElements(Us.arrayTimes(Ds.getMatrix(0, rowSize, col, col)));
+			criteria = statement1 + statement2 + var.get(GRB.DoubleAttr.Obj) - sumElements(Us.arrayTimes(Ds.getMatrix(0, rowSize, col, col)));
 			System.out.println("cri: "+ criteria);
 			if (criteria >= z) fixTo0.add(var);
 			}
@@ -592,28 +476,7 @@ public class LR_Main {
 			System.out.println("cri: "+ criteria);
 			if (criteria >= z) fixTo1.add(var);
 		}		
-	}
-	
-	/**
-	 * Relaxes the binary variables in the model.
-	 * @param model
-	 * @throws GRBException
-	 */
-	private static void relaxModel(GRBModel model) throws GRBException{
-		for (GRBVar var : model.getVars())
-			var.set(GRB.CharAttr.VType, 'C');		
-	}
-	
-	/**
-	 * Sets all the variables in the model to binaries
-	 * @param model
-	 * @throws GRBException
-	 */
-	private static void setBinaries(GRBModel model) throws GRBException{
-		for (GRBVar var : model.getVars())
-			var.set(GRB.CharAttr.VType, 'B');
-		model.update();
-	}
+	}*/
 	
 	/**
 	 * Obtains lower bound by fixing location variables in the original problem.
@@ -624,9 +487,10 @@ public class LR_Main {
 	 */
 	protected static LB obtainLB(GRBModel OP, GRBModel SP) throws GRBException{
 		LB lb = new LB();
-		int nVar = OP.get(GRB.IntAttr.NumVars);
-		for (int i = 1 ; i <= N ; i++)
-			fixVar(OP.getVar(nVar-i), SP.getVar(nVar-i).get(GRB.DoubleAttr.X), null);
+		int nvarSP = SP.get(GRB.IntAttr.NumVars);
+		for (int i = 1 ; i <= N ; i++){
+			fixVar(OP.getVar(nVar-i), SP.getVar(nvarSP-i).get(GRB.DoubleAttr.X), null);
+		}			
 		OP.optimize();
 		lb.value = OP.get(GRB.DoubleAttr.ObjVal);	
 		
@@ -694,6 +558,9 @@ public class LR_Main {
 		GRBVar[] y0 = new GRBVar[N]; // variables to be added to the original model	
 		GRBVar[][][][][] x = new GRBVar[N][N][N][N][R + 1]; // variables to be added to the Lagrangian dual model (Sub-problem)
 		GRBVar[] y = new GRBVar[N];// variables to be added to the Lagrangian dual model (Sub-problem)
+		List<GRBVar> slacks = new ArrayList<GRBVar>();
+		List<Double> Us = new ArrayList<Double>();
+		
 		
 		for (int i = 0; i < N; i++) {
 			for (int j = i + 1; j < N; j++) {
@@ -703,15 +570,80 @@ public class LR_Main {
 							String varName = i + "_" + k + "_" + m + "_"
 									+ j + "_" + r;
 							x[i][k][m][j][r] = SP.addVar(0.0, GRB.INFINITY, 0.0,
-									GRB.BINARY, varName);
+									GRB.CONTINUOUS, varName);
 							x0[i][k][m][j][r] = OP.addVar(0.0, GRB.INFINITY, 0.0,
-									GRB.BINARY, varName);
+									GRB.CONTINUOUS, varName);
 						}
 					}
 				}
 			}
-		}		
-
+		}	
+		
+		// slacks for constraint 6
+		/*GRBVar[][][] slack6 = new GRBVar[N][N][N*(N-1)*(R+1)/2 + 1]; 
+		for (int i = 0; i < N; i++) {
+			for (int j = i + 1; j < N; j++) {
+				for (int r = 0; r <= N*(N-1)*(R+1)/2; r++) {
+					slack6[i][j][r] = SP.addVar(-1*GRB.INFINITY, GRB.INFINITY, 0, GRB.CONTINUOUS, null);
+				}
+			}
+		}
+		
+		// slacks for constraint 7
+		GRBVar[][][] slack7 = new GRBVar[N][N][N*(N-1)*(R+1)/2 + 1]; 
+		for (int i = 0; i < N; i++) {
+			for (int j = i + 1; j < N; j++) {
+				for (int r = 0; r <= N*(N-1)*(R+1)/2; r++) {
+					slack7[i][j][r] = SP.addVar(-1*GRB.INFINITY, GRB.INFINITY, 0, GRB.CONTINUOUS, null);
+				}
+			}
+		}*/
+		
+		// slacks for constraint 8
+		GRBVar[][][] slack8 = new GRBVar[N][N][(int) (Math.pow(2, D) - 1)]; 
+		for (int i = 0; i < N; i++) {
+			for (int j = i + 1; j < N; j++) {
+				for (int r = 0; r <= Math.pow(2, D) - 2; r++) {
+					slack8[i][j][r] = SP.addVar(-1*GRB.INFINITY, GRB.INFINITY, 0, GRB.CONTINUOUS, null);
+				}
+			}
+		}
+		
+		// slacks for constraint 9
+		GRBVar[][][] slack9 = new GRBVar[N][N][(int) (Math.pow(2, D) - 1)]; 
+		for (int i = 0; i < N; i++) {
+			for (int j = i + 1; j < N; j++) {
+				for (int r = 0; r <= Math.pow(2, D) - 2; r++) {
+					slack9[i][j][r] = SP.addVar(-1*GRB.INFINITY, GRB.INFINITY, 0, GRB.CONTINUOUS, null);
+				}
+			}
+		}
+		
+		// slacks for constraint 10
+		/*GRBVar[][][][] slack10 = new GRBVar[N][N][N][(int) (Math.pow(2, D) - 1)];
+		for (int i=0;i<N;i++){
+			for (int j=i+1;j<N;j++){
+				for (int k=0;k<N;k++){
+					for (int r=0;r<=Math.pow(2, D) - 2;r++){
+						slack10[i][j][k][r] = SP.addVar(-1*GRB.INFINITY, GRB.INFINITY, 0, GRB.CONTINUOUS, null);
+						
+					}
+				}
+			}
+		}
+		
+		// slacks for constraint 10
+		GRBVar[][][][] slack11 = new GRBVar[N][N][N][(int) (Math.pow(2, D) - 1)];
+		for (int i=0;i<N;i++){
+			for (int j=i+1;j<N;j++){
+				for (int m=0;m<N;m++){
+					for (int r=0;r<=Math.pow(2, D) - 2;r++){
+						slack11[i][j][m][r] = SP.addVar(-1*GRB.INFINITY, GRB.INFINITY, 0, GRB.CONTINUOUS, null);
+					}
+				}
+			}
+		}*/
+		
 		for (int i = 0; i < N; i++) {
 			y[i] = SP.addVar(0, GRB.INFINITY, 0, GRB.BINARY, ""+i);
 			y0[i] = OP.addVar(0, GRB.INFINITY, 0, GRB.BINARY, ""+i);
@@ -730,7 +662,6 @@ public class LR_Main {
 						double CoEf = -1 * flows[i][j] * Cikmj(i, k, m, j) * (1 - Q(i,k,m,j));
 						expr0.addTerm(CoEf, x0[i][k][m][j][0]);
 						expr.addTerm(CoEf, x[i][k][m][j][0]);
-						C.set(0, getCol(x[i][k][m][j][0]), CoEf);
 					}
 				}
 			}
@@ -744,7 +675,6 @@ public class LR_Main {
 							double CoEf = -1 * flows[i][j] * Cikmj(i, k, m, j) * Math.pow(q, Math.floor(Math.log(r+1)/Math.log(2)));
 							expr0.addTerm(CoEf, x0[i][k][m][j][r]);
 							expr.addTerm(CoEf, x[i][k][m][j][r]);
-							C.set(0, getCol(x[i][k][m][j][r]), CoEf);
 						}
 					}
 				}
@@ -832,12 +762,8 @@ public class LR_Main {
 		/*
 		 *  Building Lagrangian multipliers and corresponding constraints 
 		 */
-		// Constraint 6
-/*		Matrix D6 = new Matrix(N*(N-1)*(R+1)/2, nVar);
-		Matrix d6 = new Matrix(N*(N-1)*(R+1)/2, 1, M);
-		Matrix U6 = new Matrix(N*(N-1)*(R+1)/2, 1, 500);		
-		D6 = new Matrix(N*(N-1)*(R+1)/2,nVar);
-		cntr = 0;		
+		// Constraint 6	
+		/*cntr = 0;		
 		for (int i = 0; i < N; i++) {
 			for (int j = i + 1; j < N; j++) {
 				for (int r = 0; r <= R; r++) {
@@ -847,27 +773,25 @@ public class LR_Main {
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
 							if (k != i && m != i) {
-								D6.set(cntr, getCol(x[i][k][m][j][r]), 1);
 								con6_0.addTerm(1, x0[i][k][m][j][r]);
 								con6.addTerm(1, x[i][k][m][j][r]);
 							}
 						}
 					}
-					D6.set(cntr, getLocCol(y[i]),M);
-					d6.set(cntr, 0, M);
 					con6_0.addTerm(M, y0[i]);
 					con6.addTerm(M, y[i]);
 					OP.addConstr(con6_0, GRB.LESS_EQUAL, M, "u6_" + i + "_" + j + "_" + r);
-//					SP.addConstr(con6, GRB.LESS_EQUAL, M, "u6_" + i + "_" + j + "_" + r);
+					SP.addConstr(con6_0, GRB.LESS_EQUAL, M, "u6_" + i + "_" + j + "_" + r);
+//					con6.addTerm(1, slack6[i][j][r]);
+//					SP.addConstr(con6, GRB.LESS_EQUAL, M, "s6_" + i + "_" + j + "_" + r);
+//					slacks.add(slack6[i][j][r]);
+//					Us.add(0.0);
 					cntr++;
 				}
 			}
 		}
 		
-		// Constraint 7
-		Matrix D7 = new Matrix(N*(N-1)*(R+1)/2, nVar);
-		Matrix d7 = new Matrix(N*(N-1)*(R+1)/2, 1, M);
-		Matrix U7 = new Matrix(N*(N-1)*(R+1)/2, 1, 500);		
+		// Constraint 7	
 		cntr = 0; 		
 		for (int i = 0; i < N; i++) {
 			for (int j = i + 1; j < N; j++) {
@@ -878,27 +802,21 @@ public class LR_Main {
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
 							if (k != j && m != j) {
-								D7.set(cntr, getCol(x[i][k][m][j][r]), 1);
 								con7_0.addTerm(1, x0[i][k][m][j][r]);
 								con7.addTerm(1, x[i][k][m][j][r]);
 							}
 						}
 					}
-					D7.set(cntr,getLocCol(y[j]),M);
-					d7.set(cntr, 0, M);
 					con7_0.addTerm(M, y0[j]);
 					con7.addTerm(M, y[j]);
 					OP.addConstr(con7_0, GRB.LESS_EQUAL, M, "u7_" + i + "_" + j + "_" + r);
-//					SP.addConstr(con7, GRB.LESS_EQUAL, M, "u7_" + i + "_" + j + "_" + r);
+					SP.addConstr(con7, GRB.LESS_EQUAL, M, "u7_" + i + "_" + j + "_" + r);
 					cntr++;
 				}
 			}
 		}*/
 		
 		// Constraint 8
-		Matrix D8 = new Matrix((int) (N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
-		Matrix d8 = new Matrix((int) (N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 0);
-		Matrix U8 = new Matrix((int) (N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 500);
 		cntr = 0; 
 		for (int i = 0; i < N; i++) {
 			for (int j = i + 1; j < N; j++) {
@@ -909,8 +827,6 @@ public class LR_Main {
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
 							if (k != i && k != j) {
-								D8.set(cntr, getCol(x[i][k][m][j][r]), 1);
-								if (r==0 && i == 0 && j == 1) System.out.println(x[i][k][m][j][r].get(GRB.StringAttr.VarName) + ": CoEf="+1+" - row="+cntr+" - col="+ getCol(x[i][k][m][j][r]));
 								con8_0.addTerm(1, x0[i][k][m][j][r]);
 								con8.addTerm(1, x[i][k][m][j][r]);
 							}
@@ -919,23 +835,21 @@ public class LR_Main {
 					
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
-							D8.set(cntr, getCol(x[i][k][m][j][2 * r + 1]), -1);
-							if (r==0 && i == 0 && j == 1) System.out.println(x[i][k][m][j][2 * r + 1].get(GRB.StringAttr.VarName) + ": CoEf= -1"+" - row="+cntr+" - col="+ getCol(x[i][k][m][j][2 * r +1]));
 							con8_0.addTerm(-1, x0[i][k][m][j][2 * r + 1]);  // Left child node
 							con8.addTerm(-1, x[i][k][m][j][2 * r + 1]);  // Left child node
 						}
 					}
 					OP.addConstr(con8_0, GRB.LESS_EQUAL, 0, "u8_" + i + "_" + j + "_" + r);
-//					SP.addConstr(con8, GRB.LESS_EQUAL, 0, "u8_" + i + "_" + j + "_" + r);
+					con8.addTerm(1, slack8[i][j][r]);
+					slacks.add(slack8[i][j][r]);
+					Us.add(0.0);
+					SP.addConstr(con8, GRB.EQUAL, 0, "u8_" + i + "_" + j + "_" + r);
 					cntr++;
 				}
 			}
 		}
 		
 		// Constraint 9
-	/*	Matrix D9 = new Matrix((int) (N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
-		Matrix d9 = new Matrix((int) (N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 0);
-		Matrix U9 = new Matrix((int) (N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 500);
 		cntr = 0; 		
 		for (int i = 0; i < N; i++) {
 			for (int j = i + 1; j < N; j++) {
@@ -946,7 +860,6 @@ public class LR_Main {
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {
 							if (m!=i && m!=j){
-								D9.set(cntr, getCol(x[i][k][m][j][r]),1);
 								con9_0.addTerm(1, x0[i][k][m][j][r]);
 								con9.addTerm(1, x[i][k][m][j][r]);
 							}
@@ -955,23 +868,22 @@ public class LR_Main {
 					
 					for (int k = 0; k < N; k++) {
 						for (int m = 0; m < N; m++) {							
-							D9.set(cntr, getCol(x[i][k][m][j][2 * r + 2]), -1);
 							con9_0.addTerm(-1, x0[i][k][m][j][2 * r + 2]);
 							con9.addTerm(-1, x[i][k][m][j][2 * r + 2]);
 						}
 					}
 					OP.addConstr(con9_0, GRB.LESS_EQUAL, 0, "u9_" + i + "_" + j + "_" + r);
-//					SP.addConstr(con9, GRB.LESS_EQUAL, 0, "u9_" + i + "_" + j + "_" + r);
+					con9.addTerm(1, slack9[i][j][r]);
+					slacks.add(slack9[i][j][r]);
+					Us.add(0.0);
+					SP.addConstr(con9, GRB.EQUAL, 0, "u9_" + i + "_" + j + "_" + r);
 					cntr++;
 				}
 			}
 		}
 		
 		// Constraint 10
-		Matrix D10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
-		Matrix d10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, M);
-		Matrix U10 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 500);
-		cntr = 0; 		
+		/*cntr = 0; 		
 		for (int i=0;i<N;i++){
 			for (int j=i+1;j<N;j++){
 				for (int k=0;k<N;k++){
@@ -981,8 +893,6 @@ public class LR_Main {
 						GRBLinExpr con10 = new GRBLinExpr();
 						for (int s:BinaryTree.getLeftChildren(r, D)){
 							for (int m=0; m<N; m++){
-								D10.set(cntr, getCol(x[i][k][m][j][s]), 1);
-								D10.set(cntr, getCol(x[i][m][k][j][s]), 1);
 								con10_0.addTerm(1, x0[i][k][m][j][s]);
 								con10_0.addTerm(1, x0[i][m][k][j][s]);
 								con10.addTerm(1, x[i][k][m][j][s]);
@@ -990,12 +900,11 @@ public class LR_Main {
 							}
 						}
 						for (int m=0; m<N; m++){
-							D10.set(cntr, getCol(x[i][k][m][j][r]), M);
 							con10_0.addTerm(M , x0[i][k][m][j][r]);
 							con10.addTerm(M , x[i][k][m][j][r]);
 						}
 						OP.addConstr(con10_0, GRB.LESS_EQUAL, M, "u10_" + i + "_" + j + "_" + k + "_" + r);
-//						SP.addConstr(con10, GRB.LESS_EQUAL, M, "u10_" + i + "_" + j + "_" + k + "_" + r);
+						SP.addConstr(con10, GRB.LESS_EQUAL, M, "u10_" + i + "_" + j + "_" + k + "_" + r);
 						cntr++;
 					}
 				}
@@ -1003,9 +912,6 @@ public class LR_Main {
 		}
 		
 		// Constraint 11
-		Matrix D11 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), nVar);
-		Matrix d11 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, M);
-		Matrix U11 = new Matrix((int) (N*N*(N-1)*(Math.pow(2, D) - 1)/2), 1, 500);
 		cntr = 0; 		
 		for (int i=0;i<N;i++){
 			for (int j=i+1;j<N;j++){
@@ -1016,8 +922,6 @@ public class LR_Main {
 						GRBLinExpr con11 = new GRBLinExpr();
 						for (int s : BinaryTree.getRightChildren(r, D)) {
 							for (int k = 0; k < N; k++) {
-								D11.set(cntr, getCol(x[i][k][m][j][s]), 1);
-								D11.set(cntr, getCol(x[i][m][k][j][s]), 1);
 								con11_0.addTerm(1, x0[i][k][m][j][s]);
 								con11_0.addTerm(1, x0[i][m][k][j][s]);
 								con11.addTerm(1, x[i][k][m][j][s]);
@@ -1025,48 +929,44 @@ public class LR_Main {
 							}
 						}
 						for (int k = 0; k < N; k++) {
-							D11.set(cntr, getCol(x[i][k][m][j][r]), M);
 							con11_0.addTerm(M, x0[i][k][m][j][r]);
 							con11.addTerm(M, x[i][k][m][j][r]);
 						}
 						OP.addConstr(con11_0, GRB.LESS_EQUAL, M, "u11_" + i + "_" + j + "_" + m + "_" + r);
-//						SP.addConstr(con11, GRB.LESS_EQUAL, M, "u11_" + i + "_" + j + "_" + m + "_" + r);
+						SP.addConstr(con11, GRB.LESS_EQUAL, M, "u11_" + i + "_" + j + "_" + m + "_" + r);
 						cntr++;
 					}
 				}
 			}
 		}*/
+		
 		/*
 		 * Lagrangian Relaxation Algorithm starts:
 		 */
 		// Obtaining Upper Bound
 		double startTime = System.currentTimeMillis();
 		SP.optimize();
-//		printSol(SP);
+		printSol(SP);
 		LB = obtainLB(OP, SP);
 		UB = SP.get(GRB.DoubleAttr.ObjVal);
 		
 		updateLB(LB.value);
-		
-		ArrayList<Matrix> ds_List = new ArrayList<Matrix>();
-		ArrayList<Matrix> Ds_List = new ArrayList<Matrix>();
-		ArrayList<Matrix> Us_List = new ArrayList<Matrix>();
-		/*ds_List.add(d6);ds_List.add(d7);*/ds_List.add(d8);/*ds_List.add(d9);ds_List.add(d10);ds_List.add(d11);*/
-		/*Ds_List.add(D6);Ds_List.add(D7);*/Ds_List.add(D8);/*Ds_List.add(D9);Ds_List.add(D10);Ds_List.add(D11);	*/
-		/*Us_List.add(U6);Us_List.add(U7);*/Us_List.add(U8);/*Us_List.add(U9);Us_List.add(U10);Us_List.add(U11)*/;		
-		ds = concatH(ds_List);
-		Ds = concatH(Ds_List);
-		Us = concatH(Us_List);
+		System.out.println(SP.get(GRB.IntAttr.NumConstrs));
+		System.out.println(OP.get(GRB.IntAttr.NumConstrs));
+
 		System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB);
-//		OP.optimize();
+
 		cntr = 0;
+		double epsilon = 2;
 		double currentGap = GRB.INFINITY;
-		while(currentGap > gap && (k<10 || LB.value!=bestLB)){
-			cntr = dissectEpsilon(cntr, 5);
-//			miu = updateMiu(miu, k, N);
-			miu = updateMiuC(Ds, ds);		// Update Miu
-			Us = updateU(SP, miu, Us, ds, Ds);		// Update Lagrangian multipliers
-			updateObjCoeffs(SP, Us, ds, Ds);	// Update obj fun coefficients
+		while(currentGap > gap && (k<rootItrNum || /*LB.value != bestLB*/ currentGap!=bestGap)){
+			if (dissectEpsilon(cntr, 10)){
+				epsilon = epsilon/2;
+				cntr = 0;
+			}			
+			miu = updateMiuC(slacks, epsilon);		// Update Miu
+			updateU(Us, slacks, miu);		// Update Lagrangian multipliers
+			updateObjCoeffs(slacks, Us);	// Update obj fun coefficients
 			SP.optimize();
 			UB = SP.get(GRB.DoubleAttr.ObjVal);
 			cntr = updateUB(cntr, UB);
@@ -1074,7 +974,8 @@ public class LR_Main {
 			LB = obtainLB(OP, SP);
 			updateLB(LB.value);   // update best LB
 			k++;	// Counter update
-			currentGap = Math.abs((UB - LB.value)/LB.value);
+			currentGap = Math.abs((UB - LB.value)/bestLB);
+			bestGap = updateBestGap(currentGap);
 			System.out.println("miu: " + miu + " - Itr" + k + ": LB=" + LB.value + " - UB= " + UB + " - Gap = " + currentGap + " - sol: " + printSol2(SP) + " - eps: " + epsilon);
 		}	
 		List<String> selectedLocations = new ArrayList<String>();
@@ -1128,7 +1029,7 @@ public class LR_Main {
 		 * B&B procedure 2 
 		 */
 		
-		BBNode rootNode = new BBNode(0,N,Us, LB, UB, selectedLocations);
+		BBNode2 rootNode = new BBNode2(0, slacks, Us, LB, UB, selectedLocations, epsilon);
 		bestNode = rootNode;
 		List<GRBVar> unfixedVars;
 		unexploredNodes.add(rootNode);
@@ -1138,9 +1039,10 @@ public class LR_Main {
 		
 		while(!unexploredNodes.isEmpty()){
 			
-			BBNode parent = unexploredNodes.get(0);
+			BBNode2 parent = unexploredNodes.get(0);
 			if (!parent.fathom){
-				BBNode rightChild = new BBNode(2*parent.ind+2, N, parent.Us, Ds, ds, OP, SP, bestLB, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, true);
+				BBNode2 rightChild = new BBNode2(2*parent.ind+2, N, parent.slacks, parent.Us, OP, SP, bestLB, 
+						parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, true, parent.epsilon, nodesItrNum);
 				rightChild.updateFathom(P, N);
 				if (!rightChild.fathom){
 					unfixedVars = getUnfixedVars(y, rightChild);
@@ -1150,13 +1052,14 @@ public class LR_Main {
 				}else{
 					BBNodeList.add(rightChild);
 				}
-				LR_Main.relaxVar(SP, rightChild.noOfFixedVars);
+				LR_Main2.relaxVar(SP, rightChild.noOfFixedVars);
 				printNode(rightChild);
 				
 				if (parent.Us == null) {
 					System.out.println();
 				}
-				BBNode leftChild = new BBNode(2*parent.ind+1, N, parent.Us, Ds, ds, OP, SP, bestLB, parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, false);
+				BBNode2 leftChild = new BBNode2(2*parent.ind+1, N, parent.slacks, parent.Us, OP, SP, bestLB, 
+						parent.varsFixedTo1, parent.varsFixedTo0, parent.varToFix, false, parent.epsilon, nodesItrNum);
 				leftChild.updateFathom(P, N);
 				if (!leftChild.fathom){
 					unfixedVars = getUnfixedVars(y, leftChild);
@@ -1166,7 +1069,7 @@ public class LR_Main {
 				}else{
 					BBNodeList.add(leftChild);
 				}				
-				LR_Main.relaxVar(SP, leftChild.noOfFixedVars);
+				LR_Main2.relaxVar(SP, leftChild.noOfFixedVars);
 				printNode(leftChild);
 			}
 			updateBestNode(parent);
